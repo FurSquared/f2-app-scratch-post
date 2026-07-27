@@ -3,6 +3,7 @@ import scratchPostApp, {
   type MicroAppActivation,
   type MicroAppAudio,
 } from '../src'
+import { createMicroAppStorage } from './microAppStorage'
 import './styles.css'
 
 const imageUrl = new URL('../assets/scratch-post.webp', import.meta.url).href
@@ -15,6 +16,7 @@ const taskButton = document.querySelector<HTMLButtonElement>('#task-button')!
 const minimizeButton = document.querySelector<HTMLButtonElement>('#minimize')!
 const closeButton = document.querySelector<HTMLButtonElement>('#close')!
 const status = document.querySelector<HTMLElement>('#status')!
+const storage = createMicroAppStorage(scratchPostApp.manifest.id)
 
 let sharedAudioContext: AudioContext | undefined
 let appAudioGain: GainNode | undefined
@@ -98,6 +100,7 @@ const mount = (activation: MicroAppActivation) => {
     canvas,
     imageUrl,
     audio: createAudioBus(),
+    storage,
     signal: abortController.signal,
     requestFrame: (callback) => window.requestAnimationFrame(callback),
     cancelFrame: (handle) => window.cancelAnimationFrame(handle),
