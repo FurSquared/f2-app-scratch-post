@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.0...v0.4.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* deduplicate purchase milestone dings ([3401d0e](https://github.com/FurSquared/f2-app-scratch-post/commit/3401d0e5a67d2ecb9045d333f4ce6a207d5616f2))
+
 ## [0.4.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.3.0...v0.4.0) (2026-07-27)
 
 
