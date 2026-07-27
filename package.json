@@ -1,0 +1,37 @@
+{
+  "name": "@fursquared/f2-app-scratch-post",
+  "version": "0.1.0",
+  "description": "The Scratch Post canvas micro app for FurSquared",
+  "type": "module",
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "files": [
+    "assets",
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./assets/scratch-post.webp": "./assets/scratch-post.webp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FurSquared/f2-app-scratch-post.git"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "npm run typecheck",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
+
