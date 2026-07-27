@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.1...v0.4.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* rate limit overlapping milestone dings ([502b555](https://github.com/FurSquared/f2-app-scratch-post/commit/502b555006fd278859d997e03043250c9ce29804))
+
 ## [0.4.1](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.0...v0.4.1) (2026-07-27)
 
 
