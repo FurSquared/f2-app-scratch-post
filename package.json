@@ -1,6 +1,6 @@
 {
   "name": "@fursquared/f2-app-scratch-post",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Scratch Post canvas micro app for FurSquared",
   "type": "module",
   "license": "MIT",
