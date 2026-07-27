@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.3.0...v0.4.0) (2026-07-27)
+
+
+### Features
+
+* add advanced clicker upgrades ([7eb6155](https://github.com/FurSquared/f2-app-scratch-post/commit/7eb61553b86239046046dcde7da54afe7182a59a))
+
 ## [0.3.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.2.0...v0.3.0) (2026-07-27)
 
 
