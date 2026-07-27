@@ -12,6 +12,8 @@ const surface = document.querySelector<HTMLElement>('#app-surface')!
 const canvas = document.querySelector<HTMLCanvasElement>('#app-canvas')!
 const titleBar = document.querySelector<HTMLElement>('#title-bar')!
 const desktopShortcut = document.querySelector<HTMLButtonElement>('#desktop-shortcut')!
+const addBillionPointsButton =
+  document.querySelector<HTMLButtonElement>('#add-billion-points')!
 const taskButton = document.querySelector<HTMLButtonElement>('#task-button')!
 const minimizeButton = document.querySelector<HTMLButtonElement>('#minimize')!
 const closeButton = document.querySelector<HTMLButtonElement>('#close')!
@@ -35,8 +37,11 @@ const unlockAudio = () => {
     sharedAudioContext = new window.AudioContext()
     sharedAudioContext.addEventListener('statechange', updateStatus)
   }
-  if (sharedAudioContext.state === 'suspended') {
-    void sharedAudioContext.resume().finally(updateStatus)
+  if (
+    sharedAudioContext.state !== 'running' &&
+    sharedAudioContext.state !== 'closed'
+  ) {
+    void sharedAudioContext.resume().catch(() => {}).finally(updateStatus)
   }
   updateStatus()
 }
@@ -142,6 +147,31 @@ const close = () => {
   updateStatus()
 }
 
+const addBillionPoints = async () => {
+  addBillionPointsButton.disabled = true
+  close()
+
+  try {
+    const storedCount = await storage.get<number>('twines-scratched')
+    const currentCount =
+      typeof storedCount === 'number' &&
+      Number.isSafeInteger(storedCount) &&
+      storedCount >= 0
+        ? storedCount
+        : 0
+    await storage.setMany([
+      [
+        'twines-scratched',
+        Math.min(Number.MAX_SAFE_INTEGER, currentCount + 1_000_000_000),
+      ],
+      ['scratch-counter', true],
+    ])
+  } finally {
+    open()
+    addBillionPointsButton.disabled = false
+  }
+}
+
 new ResizeObserver(resize).observe(surface)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
@@ -157,6 +187,9 @@ desktopShortcut.addEventListener('dblclick', open)
 taskButton.addEventListener('click', open)
 minimizeButton.addEventListener('click', minimize)
 closeButton.addEventListener('click', close)
+addBillionPointsButton.addEventListener('click', () => {
+  void addBillionPoints()
+})
 
 let drag:
   | {

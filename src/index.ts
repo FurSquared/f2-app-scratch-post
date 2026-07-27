@@ -13,20 +13,21 @@ const scratchCounterStorageKey = 'scratch-counter'
 const autoScratchersStorageKey = 'auto-scratchers'
 const storageSyncMilliseconds = 1000
 const twineCounterRevealCount = 100
-const twineDingCounts = new Set<number>([
-  200,
-  300,
-  1_000,
-  2_000,
-  10_000,
-  50_000,
-])
+const humanHandsId = 'human-hands'
+const humanHandsCost = 1_000_000_000
+const humanHandsBaseCycleMilliseconds = 8_000
+const humanHandsBaseSweepMilliseconds = 1_800
+const humanHandsBaseTurnMilliseconds = 550
 
 type AutoScratcherId =
   | 'clawless-bapper'
   | 'kitty-claws'
   | 'bear-claws'
   | 'tiger-claws'
+  | 'raptor-talon'
+  | 'dragon-talon'
+
+type PurchaseId = AutoScratcherId | typeof humanHandsId
 
 type AutoScratcherDefinition = {
   id: AutoScratcherId
@@ -34,6 +35,7 @@ type AutoScratcherDefinition = {
   color: string
   cost: number
   twinesPerSecond: number
+  icon: 'paw' | 'talon'
 }
 
 type AutoScratcherActor = {
@@ -93,6 +95,20 @@ const autoScratcherMotionProfiles: Record<AutoScratcherId, AutoScratcherMotionPr
     positionAmplitudeY: [0.05, 0.085],
     angleAmplitude: [0.14, 0.28],
   },
+  'raptor-talon': {
+    positionSpeed: [0.5, 0.72],
+    angleSpeed: [0.78, 1.08],
+    positionAmplitudeX: [0.007, 0.015],
+    positionAmplitudeY: [0.045, 0.08],
+    angleAmplitude: [0.15, 0.29],
+  },
+  'dragon-talon': {
+    positionSpeed: [0.38, 0.58],
+    angleSpeed: [0.68, 0.98],
+    positionAmplitudeX: [0.008, 0.016],
+    positionAmplitudeY: [0.055, 0.095],
+    angleAmplitude: [0.18, 0.34],
+  },
 }
 
 const autoScratcherDefinitions: AutoScratcherDefinition[] = [
@@ -102,6 +118,7 @@ const autoScratcherDefinitions: AutoScratcherDefinition[] = [
     color: '#fff',
     cost: 100,
     twinesPerSecond: 1,
+    icon: 'paw',
   },
   {
     id: 'kitty-claws',
@@ -109,6 +126,7 @@ const autoScratcherDefinitions: AutoScratcherDefinition[] = [
     color: '#111',
     cost: 500,
     twinesPerSecond: 10,
+    icon: 'paw',
   },
   {
     id: 'tiger-claws',
@@ -116,6 +134,7 @@ const autoScratcherDefinitions: AutoScratcherDefinition[] = [
     color: '#f28c28',
     cost: 10_000,
     twinesPerSecond: 50,
+    icon: 'paw',
   },
   {
     id: 'bear-claws',
@@ -123,8 +142,32 @@ const autoScratcherDefinitions: AutoScratcherDefinition[] = [
     color: '#8b5a2b',
     cost: 50_000,
     twinesPerSecond: 200,
+    icon: 'paw',
+  },
+  {
+    id: 'raptor-talon',
+    label: 'Raptor Talon',
+    color: '#8f969d',
+    cost: 100_000,
+    twinesPerSecond: 400,
+    icon: 'talon',
+  },
+  {
+    id: 'dragon-talon',
+    label: 'Dragon Talon',
+    color: '#b72d2d',
+    cost: 500_000,
+    twinesPerSecond: 2_000,
+    icon: 'talon',
   },
 ]
+
+const humanHandsDefinition = {
+  id: humanHandsId,
+  label: 'Human... Hands...',
+  color: '#b98552',
+  cost: humanHandsCost,
+} as const
 
 export type MicroAppViewport = {
   width: number
@@ -344,6 +387,8 @@ type Twine = {
   bornAt: number
   lifetime: number
   settled: boolean
+  swept?: boolean
+  lastHumanHandSweepCycle?: number
   landingSourceY?: number
 }
 
@@ -413,6 +458,146 @@ export function drawPaw(
   context.restore()
 }
 
+type DrawTalonOptions = {
+  color: string
+  x: number
+  y: number
+  scale?: number
+  rotation?: number
+  alpha?: number
+  strokeColor?: string
+  strokeWidth?: number
+  anchorX?: number
+  anchorY?: number
+}
+
+function drawTalon(
+  context: CanvasRenderingContext2D,
+  {
+    color,
+    x,
+    y,
+    scale = 1,
+    rotation = Math.PI / 4,
+    alpha = 1,
+    strokeColor = 'rgba(42, 31, 22, 0.9)',
+    strokeWidth = 1.5,
+    anchorX = 12,
+    anchorY = 12,
+  }: DrawTalonOptions
+) {
+  context.save()
+  context.translate(x, y)
+  context.rotate(rotation)
+  context.scale(scale, scale)
+  context.translate(-anchorX, -anchorY)
+  context.globalAlpha *= alpha
+  context.fillStyle = color
+  context.strokeStyle = strokeColor
+  context.lineWidth = strokeWidth
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  const cone = new Path2D(
+    'M20.9 18.55L12.9 2.57A1 1 0 0 0 11.1 2.57L3.1 18.55Z'
+  )
+  context.fill(cone)
+  context.stroke(cone)
+  context.beginPath()
+  context.ellipse(12, 19, 9, 3, 0, 0, Math.PI * 2)
+  context.fill()
+  context.stroke()
+
+  context.globalAlpha *= 0.32
+  context.beginPath()
+  context.ellipse(12, 19, 5.5, 1.45, 0, 0, Math.PI * 2)
+  context.stroke()
+  context.restore()
+}
+
+type DrawHandOptions = {
+  color: string
+  x: number
+  y: number
+  variant?: 'open' | 'grab'
+  scale?: number
+  rotation?: number
+  alpha?: number
+  strokeColor?: string
+  strokeWidth?: number
+  anchorX?: number
+  anchorY?: number
+}
+
+function drawHand(
+  context: CanvasRenderingContext2D,
+  {
+    color,
+    x,
+    y,
+    variant = 'open',
+    scale = 1,
+    rotation = 0,
+    alpha = 1,
+    strokeColor = 'rgba(42, 31, 22, 0.9)',
+    strokeWidth = 1.5,
+    anchorX = 12,
+    anchorY = 12,
+  }: DrawHandOptions
+) {
+  context.save()
+  context.translate(x, y)
+  context.rotate(rotation)
+  context.scale(scale, scale)
+  context.translate(-anchorX, -anchorY)
+  context.globalAlpha *= alpha
+  context.fillStyle = color
+  context.strokeStyle = strokeColor
+  context.lineWidth = strokeWidth
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  const outline = new Path2D(
+    variant === 'grab'
+      ? 'M18 11.5V9A2 2 0 0 0 16 7A2 2 0 0 0 14 9V10.4M14 10V8A2 2 0 0 0 12 6A2 2 0 0 0 10 8V10M10 9.9V9A2 2 0 0 0 8 7A2 2 0 0 0 6 9V14M6 14A2 2 0 0 0 4 12A2 2 0 0 0 2 14M18 11A2 2 0 1 1 22 11V14A8 8 0 0 1 14 22H10A8 8 0 0 1 2 14A2 2 0 1 1 6 14'
+      : 'M18 11V6A2 2 0 0 0 16 4A2 2 0 0 0 14 6M14 10V4A2 2 0 0 0 12 2A2 2 0 0 0 10 4V6M10 10.5V6A2 2 0 0 0 8 4A2 2 0 0 0 6 6V14M18 8A2 2 0 1 1 22 8V14A8 8 0 0 1 14 22H12C9.2 22 7.5 21.14 6.01 19.66L2.41 16.06A2 2 0 0 1 5.24 13.24L7 15'
+  )
+  const palmFill = new Path2D(
+    variant === 'grab'
+      ? 'M18 11A2 2 0 1 1 22 11V14A8 8 0 0 1 14 22H10A8 8 0 0 1 2 14A2 2 0 1 1 6 14Z'
+      : 'M18 8A2 2 0 1 1 22 8V14A8 8 0 0 1 14 22H12C9.2 22 7.5 21.14 6.01 19.66L2.41 16.06A2 2 0 0 1 5.24 13.24L7 15V10H18Z'
+  )
+  context.fill(palmFill)
+
+  context.strokeStyle = color
+  context.lineWidth = 4
+  const fingerFills =
+    variant === 'grab'
+      ? [
+          [8, 9, 8, 15],
+          [12, 8, 12, 14],
+          [16, 9, 16, 14],
+          [20, 11, 20, 14],
+        ]
+      : [
+          [8, 6, 8, 15],
+          [12, 4, 12, 14],
+          [16, 6, 16, 14],
+          [20, 8, 20, 14],
+        ]
+  fingerFills.forEach(([startX, startY, endX, endY]) => {
+    context.beginPath()
+    context.moveTo(startX, startY)
+    context.lineTo(endX, endY)
+    context.stroke()
+  })
+
+  context.strokeStyle = strokeColor
+  context.lineWidth = strokeWidth
+  context.stroke(outline)
+  context.restore()
+}
+
 function createScratchAudio(audio?: MicroAppAudio) {
   if (!audio) {
     return {
@@ -420,6 +605,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
       playDing: () => {},
       playThump: () => {},
       playMew: () => {},
+      playScreech: () => {},
       playRoar: () => {},
       destroy: () => {},
     }
@@ -599,12 +785,79 @@ function createScratchAudio(audio?: MicroAppAudio) {
     )
   }
 
-  const playRoar = () => {
+  const playScreech = (pitchScale = 1) => {
+    if (destroyed) return
+    audio.resume()
+
+    const now = context.currentTime
+    const duration = 0.9
+    const normalizedPitchScale = Math.max(0.35, Math.min(1.6, pitchScale))
+    const voice = context.createOscillator()
+    const overtone = context.createOscillator()
+    const vibrato = context.createOscillator()
+    const vibratoDepth = context.createGain()
+    const overtoneGain = context.createGain()
+    const filter = context.createBiquadFilter()
+    const envelope = context.createGain()
+
+    voice.type = 'sawtooth'
+    voice.frequency.setValueAtTime(620 * normalizedPitchScale, now)
+    voice.frequency.exponentialRampToValueAtTime(
+      980 * normalizedPitchScale,
+      now + 0.2
+    )
+    voice.frequency.exponentialRampToValueAtTime(
+      390 * normalizedPitchScale,
+      now + duration
+    )
+    overtone.type = 'square'
+    overtone.frequency.setValueAtTime(1_240 * normalizedPitchScale, now)
+    overtone.frequency.exponentialRampToValueAtTime(
+      780 * normalizedPitchScale,
+      now + duration
+    )
+    overtoneGain.gain.value = 0.13
+    vibrato.type = 'triangle'
+    vibrato.frequency.value = 27
+    vibratoDepth.gain.value = 34 * normalizedPitchScale
+    filter.type = 'bandpass'
+    filter.frequency.value = 1_450 * normalizedPitchScale
+    filter.Q.value = 1.8
+    envelope.gain.setValueAtTime(0.0001, now)
+    envelope.gain.exponentialRampToValueAtTime(0.11, now + 0.025)
+    envelope.gain.setValueAtTime(0.085, now + 0.34)
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+
+    vibrato.connect(vibratoDepth)
+    vibratoDepth.connect(voice.frequency)
+    voice.connect(filter)
+    overtone.connect(overtoneGain)
+    overtoneGain.connect(filter)
+    filter.connect(envelope)
+    envelope.connect(audio.destination)
+    scheduleSound(
+      [voice, overtone, vibrato],
+      [
+        voice,
+        overtone,
+        vibrato,
+        vibratoDepth,
+        overtoneGain,
+        filter,
+        envelope,
+      ],
+      now,
+      duration
+    )
+  }
+
+  const playRoar = (pitchScale = 1) => {
     if (destroyed) return
     audio.resume()
 
     const now = context.currentTime
     const duration = 1.15
+    const normalizedPitchScale = Math.max(0.5, Math.min(1.5, pitchScale))
     const noiseBuffer = context.createBuffer(
       1,
       Math.ceil(context.sampleRate * duration),
@@ -622,12 +875,18 @@ function createScratchAudio(audio?: MicroAppAudio) {
     const envelope = context.createGain()
     noise.buffer = noiseBuffer
     growl.type = 'sawtooth'
-    growl.frequency.setValueAtTime(82, now)
-    growl.frequency.exponentialRampToValueAtTime(44, now + duration)
+    growl.frequency.setValueAtTime(82 * normalizedPitchScale, now)
+    growl.frequency.exponentialRampToValueAtTime(
+      44 * normalizedPitchScale,
+      now + duration
+    )
     growlGain.gain.value = 0.18
     filter.type = 'lowpass'
-    filter.frequency.setValueAtTime(520, now)
-    filter.frequency.exponentialRampToValueAtTime(180, now + duration)
+    filter.frequency.setValueAtTime(520 * normalizedPitchScale, now)
+    filter.frequency.exponentialRampToValueAtTime(
+      180 * normalizedPitchScale,
+      now + duration
+    )
     filter.Q.value = 1.4
     envelope.gain.setValueAtTime(0.0001, now)
     envelope.gain.exponentialRampToValueAtTime(0.16, now + 0.06)
@@ -651,6 +910,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
     playDing,
     playThump,
     playMew,
+    playScreech,
     playRoar,
     destroy() {
       if (destroyed) return
@@ -734,6 +994,22 @@ function createScratchPostApp(): MicroApp {
     let twinesScratchedDirty = false
     let autoScratchersDirty = false
     let scratchCounterActive = false
+    let humanHandsLevel = 0
+    let humanHandsPurchasedThisMount = 0
+    let humanHandSweepCycle = -1
+    let previousHumanHandX: number | undefined
+    let previousHumanHandY: number | undefined
+    let humanHandAnimationMilliseconds = 0
+    let humanHandAnimationSpeed = 1
+    let lastHumanHandAnimationAt = 0
+    let humanHandSweepPlan:
+      | {
+          cycle: number
+          leftYRatio: number
+          rightYRatio: number
+          curveRatio: number
+        }
+      | undefined
     const autoScratchers = Object.fromEntries(
       autoScratcherDefinitions.map((definition) => [
         definition.id,
@@ -753,7 +1029,7 @@ function createScratchPostApp(): MicroApp {
       autoScratcherDefinitions.map((definition) => [definition.id, 0])
     ) as Record<AutoScratcherId, number>
     let purchaseHitRegions: Array<{
-      id: AutoScratcherId
+      id: PurchaseId
       x: number
       y: number
       width: number
@@ -780,9 +1056,34 @@ function createScratchPostApp(): MicroApp {
       })
     }
 
+    const automaticTwinesPerSecond = () =>
+      autoScratcherDefinitions.reduce(
+        (total, definition) =>
+          total +
+          definition.twinesPerSecond *
+            autoScratchers[definition.id].actors.length,
+        0
+      )
+
     const playCrossedTwineDings = (previousCount: number, nextCount: number) => {
-      twineDingCounts.forEach((dingCount) => {
-        if (previousCount < dingCount && nextCount >= dingCount) scratchAudio.playDing()
+      const productionRate = automaticTwinesPerSecond()
+      const dingCounts = new Set<number>()
+      const purchaseCosts = [
+        ...autoScratcherDefinitions.map((definition) => definition.cost),
+        humanHandsDefinition.cost,
+      ]
+
+      purchaseCosts.forEach((cost) => {
+        if (productionRate > cost) return
+        for (let multiple = 1; multiple <= 10; multiple += 1) {
+          dingCounts.add(cost * multiple)
+        }
+      })
+
+      dingCounts.forEach((dingCount) => {
+        if (previousCount < dingCount && nextCount >= dingCount) {
+          scratchAudio.playDing()
+        }
       })
     }
 
@@ -807,13 +1108,15 @@ function createScratchPostApp(): MicroApp {
       }
     }
 
-    const storedAutoScratcherCounts = () =>
-      Object.fromEntries(
+    const storedAutoScratcherCounts = () => ({
+      ...(Object.fromEntries(
         autoScratcherDefinitions.map((definition) => [
           definition.id,
           autoScratchers[definition.id].actors.length,
         ])
-      )
+      ) as Record<AutoScratcherId, number>),
+      [humanHandsId]: humanHandsLevel,
+    }) satisfies Record<PurchaseId, number>
 
     const persistAppState = async () => {
       if (
@@ -837,7 +1140,8 @@ function createScratchPostApp(): MicroApp {
             (definition) =>
               autoScratchers[definition.id].actors.length ===
                 autoScratcherCounts[definition.id]
-          )
+          ) &&
+          humanHandsLevel === autoScratcherCounts[humanHandsId]
         ) {
           autoScratchersDirty = false
         }
@@ -896,12 +1200,29 @@ function createScratchPostApp(): MicroApp {
           }
           staggerAutoScratcherActors(definition, state.actors[0])
         })
+        const storedHumanHandsCount =
+          storedAutoScratchers &&
+          typeof storedAutoScratchers === 'object' &&
+          humanHandsId in storedAutoScratchers
+            ? (storedAutoScratchers as Record<string, unknown>)[humanHandsId]
+            : 0
+        const validHumanHandsCount =
+          typeof storedHumanHandsCount === 'number' &&
+          Number.isSafeInteger(storedHumanHandsCount) &&
+          storedHumanHandsCount >= 0
+            ? storedHumanHandsCount
+            : 0
+        humanHandsLevel =
+          validHumanHandsCount + humanHandsPurchasedThisMount
         twinesScratchedDirty = twinesScratchedThisMount > 0
-        autoScratchersDirty = autoScratcherDefinitions.some(
-          (definition) => autoScratchers[definition.id].purchasedThisMount > 0
-        )
+        autoScratchersDirty =
+          humanHandsPurchasedThisMount > 0 ||
+          autoScratcherDefinitions.some(
+            (definition) => autoScratchers[definition.id].purchasedThisMount > 0
+          )
       } catch {
         twinesScratched = twinesScratchedThisMount
+        humanHandsLevel = humanHandsPurchasedThisMount
         playCrossedTwineDings(0, twinesScratched)
         if (twinesScratched >= twineCounterRevealCount) activateScratchCounter()
       } finally {
@@ -1036,6 +1357,267 @@ function createScratchPostApp(): MicroApp {
       if (appActive && !animationFrame) animationFrame = host.requestFrame(draw)
     }
 
+    const humanHandSweepPose = (timestamp: number, layout: ImageLayout) => {
+      if (humanHandsLevel <= 0) return undefined
+
+      const cycleMilliseconds = humanHandsBaseCycleMilliseconds
+      const sweepMilliseconds = humanHandsBaseSweepMilliseconds
+      const turnMilliseconds = humanHandsBaseTurnMilliseconds
+      const idleMilliseconds =
+        cycleMilliseconds - sweepMilliseconds - turnMilliseconds * 2
+      const cycle = Math.floor(
+        humanHandAnimationMilliseconds / cycleMilliseconds
+      )
+      const cycleElapsed =
+        humanHandAnimationMilliseconds - cycle * cycleMilliseconds
+      const direction = cycle % 2 === 0 ? 1 : -1
+      const handSize = Math.max(50, Math.min(83, layout.width * 0.192))
+      const leftX = layout.x - handSize * 0.38
+      const rightX = layout.x + layout.width + handSize * 0.38
+      const startX = direction > 0 ? leftX : rightX
+      const endX = direction > 0 ? rightX : leftX
+      const idleY = layout.y + layout.height * 0.69
+      if (!humanHandSweepPlan || humanHandSweepPlan.cycle !== cycle) {
+        const curveStyle = Math.floor(Math.random() * 3)
+        const curveRatio =
+          curveStyle === 0
+            ? -(0.035 + Math.random() * 0.055)
+            : curveStyle === 1
+              ? 0.025 + Math.random() * 0.055
+              : (Math.random() * 2 - 1) * 0.014
+        humanHandSweepPlan = {
+          cycle,
+          leftYRatio: 0.82 + Math.random() * 0.1,
+          rightYRatio: 0.82 + Math.random() * 0.1,
+          curveRatio,
+        }
+      }
+      const leftPathY =
+        layout.y + layout.height * humanHandSweepPlan.leftYRatio
+      const rightPathY =
+        layout.y + layout.height * humanHandSweepPlan.rightYRatio
+      const curveOffset =
+        layout.height * humanHandSweepPlan.curveRatio
+      const bob =
+        Math.sin(humanHandAnimationMilliseconds * 0.0024) *
+        handSize *
+        0.055
+      const smooth = (progress: number) =>
+        progress * progress * progress * (progress * (progress * 6 - 15) + 10)
+      const interpolateAngle = (
+        start: number,
+        end: number,
+        progress: number
+      ) => {
+        const difference = Math.atan2(
+          Math.sin(end - start),
+          Math.cos(end - start)
+        )
+        return start + difference * progress
+      }
+      const pathY = (progress: number) =>
+        leftPathY +
+        (rightPathY - leftPathY) * progress +
+        4 * progress * (1 - progress) * curveOffset
+      const pathRotation = (progress: number) => {
+        const pathWidth = rightX - leftX
+        const tangentX = direction * pathWidth
+        const tangentY =
+          direction *
+          (rightPathY -
+            leftPathY +
+            4 * (1 - 2 * progress) * curveOffset)
+        return Math.atan2(tangentY, tangentX) + Math.PI / 2
+      }
+
+      const turnInStartsAt = idleMilliseconds
+      const sweepStartsAt = turnInStartsAt + turnMilliseconds
+      const turnOutStartsAt = sweepStartsAt + sweepMilliseconds
+      const initialPathProgress = direction > 0 ? 0 : 1
+      const finalPathProgress = direction > 0 ? 1 : 0
+      const initialPathY = pathY(initialPathProgress)
+      const finalPathY = pathY(finalPathProgress)
+      let phase: 'idle' | 'turn-in' | 'sweep' | 'turn-out' = 'idle'
+      let x = startX
+      let y = idleY + bob
+      let rotation = 0
+      let pathProgress = initialPathProgress
+
+      if (cycleElapsed >= turnOutStartsAt) {
+        phase = 'turn-out'
+        const progress = smooth(
+          Math.min(1, (cycleElapsed - turnOutStartsAt) / turnMilliseconds)
+        )
+        x = endX
+        y = finalPathY + (idleY + bob - finalPathY) * progress
+        rotation = interpolateAngle(
+          pathRotation(finalPathProgress),
+          0,
+          progress
+        )
+        pathProgress = finalPathProgress
+      } else if (cycleElapsed >= sweepStartsAt) {
+        phase = 'sweep'
+        const progress = smooth(
+          Math.min(1, (cycleElapsed - sweepStartsAt) / sweepMilliseconds)
+        )
+        pathProgress = direction > 0 ? progress : 1 - progress
+        x = leftX + (rightX - leftX) * pathProgress
+        y = pathY(pathProgress)
+        rotation = pathRotation(pathProgress)
+      } else if (cycleElapsed >= turnInStartsAt) {
+        phase = 'turn-in'
+        const progress = smooth(
+          Math.min(1, (cycleElapsed - turnInStartsAt) / turnMilliseconds)
+        )
+        y =
+          idleY +
+          bob +
+          (initialPathY - idleY - bob) * progress
+        rotation = interpolateAngle(
+          0,
+          pathRotation(initialPathProgress),
+          progress
+        )
+      }
+
+      const contact =
+        phase === 'sweep' &&
+        x >= layout.x - handSize * 0.15 &&
+        x <= layout.x + layout.width + handSize * 0.15 &&
+        y >= layout.y + layout.height * baseMaskStartRatio &&
+        y <= layout.y + layout.height
+
+      return {
+        cycle,
+        direction,
+        phase,
+        x,
+        y,
+        rotation,
+        handSize,
+        contact,
+      }
+    }
+
+    const advanceHumanHandSweep = (
+      timestamp: number,
+      layout: ImageLayout
+    ) => {
+      if (humanHandsLevel <= 0) {
+        lastHumanHandAnimationAt = timestamp
+        return
+      }
+
+      const elapsedMilliseconds = lastHumanHandAnimationAt
+        ? Math.max(0, Math.min(50, timestamp - lastHumanHandAnimationAt))
+        : 0
+      const targetSpeed = Math.pow(
+        1.1,
+        Math.min(60, Math.max(0, humanHandsLevel - 1))
+      )
+      const speedBlend =
+        1 - Math.exp(-(elapsedMilliseconds / 1000) * 3.5)
+      humanHandAnimationSpeed +=
+        (targetSpeed - humanHandAnimationSpeed) * speedBlend
+      humanHandAnimationMilliseconds +=
+        elapsedMilliseconds * humanHandAnimationSpeed
+      lastHumanHandAnimationAt = timestamp
+
+      const pose = humanHandSweepPose(timestamp, layout)
+      if (!pose) {
+        previousHumanHandX = undefined
+        previousHumanHandY = undefined
+        return
+      }
+
+      if (pose.cycle !== humanHandSweepCycle) {
+        humanHandSweepCycle = pose.cycle
+        previousHumanHandX = pose.x
+        previousHumanHandY = pose.y
+      }
+
+      if (pose.contact) {
+        const previousX = previousHumanHandX ?? pose.x
+        const previousY = previousHumanHandY ?? pose.y
+        const contactRadius = pose.handSize * 0.3
+        const segmentX = pose.x - previousX
+        const segmentY = pose.y - previousY
+        const segmentLengthSquared =
+          segmentX * segmentX + segmentY * segmentY
+
+        twines.forEach((twine) => {
+          if (twine.lastHumanHandSweepCycle === pose.cycle) return
+
+          const projection =
+            segmentLengthSquared > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    1,
+                    ((twine.x - previousX) * segmentX +
+                      (twine.y - previousY) * segmentY) /
+                      segmentLengthSquared
+                  )
+                )
+              : 0
+          const closestX = previousX + segmentX * projection
+          const closestY = previousY + segmentY * projection
+          const collisionDistance = Math.hypot(
+            twine.x - closestX,
+            twine.y - closestY
+          )
+          if (
+            collisionDistance >
+            contactRadius + twine.length * 0.5
+          ) return
+
+          twine.lastHumanHandSweepCycle = pose.cycle
+          if (twine.settled) {
+            twine.settled = false
+            twine.swept = true
+            twine.landingSourceY = undefined
+            twine.velocityX =
+              pose.direction * (90 + Math.random() * 130)
+            twine.velocityY = 70 + Math.random() * 100
+            twine.angularVelocity =
+              pose.direction * (4 + Math.random() * 8)
+          } else {
+            twine.velocityX +=
+              pose.direction * (75 + Math.random() * 110)
+            twine.velocityY += Math.random() * 80 - 20
+            twine.angularVelocity +=
+              pose.direction * (3 + Math.random() * 7)
+          }
+        })
+      }
+
+      previousHumanHandX = pose.x
+      previousHumanHandY = pose.y
+    }
+
+    const drawHumanHandSweep = (timestamp: number, layout: ImageLayout) => {
+      const pose = humanHandSweepPose(timestamp, layout)
+      if (!pose) return
+
+      const scale = pose.handSize / 24
+      context.save()
+      context.shadowColor = 'rgba(42, 31, 22, 0.35)'
+      context.shadowBlur = 5
+      context.shadowOffsetX = 3
+      context.shadowOffsetY = 4
+      drawHand(context, {
+        color: humanHandsDefinition.color,
+        x: pose.x,
+        y: pose.y,
+        variant: pose.contact ? 'grab' : 'open',
+        scale,
+        rotation: pose.rotation,
+        strokeWidth: 1.5 / scale,
+      })
+      context.restore()
+    }
+
     const updateTwines = (timestamp: number, layout: ImageLayout) => {
       const elapsed = lastFrameAt ? Math.min(0.034, (timestamp - lastFrameAt) / 1000) : 0
 
@@ -1075,7 +1657,10 @@ function createScratchPostApp(): MicroApp {
           twine.velocityY = 0
           twine.angularVelocity = 0
           twine.angle = Math.max(-0.28, Math.min(0.28, twine.angle))
-        } else if (twine.landingSourceY === undefined) {
+        } else if (
+          twine.landingSourceY === undefined &&
+          !twine.swept
+        ) {
           const baseContact = findBaseContact(twine, previousY, radius, layout)
           if (baseContact) {
             twine.landingSourceY = chooseLandingSourceY(
@@ -1165,18 +1750,71 @@ function createScratchPostApp(): MicroApp {
         const actorCount = state.actors.length
         const label =
           actorCount > 0 ? `${definition.label} ×${actorCount}` : definition.label
-        const pawScale = fontSize / 20
-        const pawX = 9
-        const pawY = y - 2
+        const iconScale = fontSize / 20
+        const iconX = 9
+        const iconY = y - 2
         const textX = 38
 
-        drawPaw(context, {
-          color: definition.color,
-          x: pawX,
-          y: pawY,
-          scale: pawScale,
-          strokeColor: 'rgba(42, 31, 22, 0.9)',
-          strokeWidth: Math.max(2, fontSize * 0.14) / pawScale,
+        if (definition.icon === 'talon') {
+          drawTalon(context, {
+            color: definition.color,
+            x: iconX + 11 * iconScale,
+            y: iconY + 11 * iconScale,
+            scale: iconScale,
+            rotation: Math.PI / 4,
+            strokeWidth: Math.max(1.5, fontSize * 0.11) / iconScale,
+          })
+        } else {
+          drawPaw(context, {
+            color: definition.color,
+            x: iconX,
+            y: iconY,
+            scale: iconScale,
+            strokeColor: 'rgba(42, 31, 22, 0.9)',
+            strokeWidth: Math.max(2, fontSize * 0.14) / iconScale,
+          })
+        }
+
+        context.save()
+        context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+        context.textBaseline = 'top'
+        context.lineJoin = 'round'
+        context.lineWidth = Math.max(3, fontSize * 0.18)
+        context.strokeStyle = 'rgba(42, 31, 22, 0.9)'
+        context.strokeText(label, textX, y)
+        context.fillStyle = '#fff'
+        context.fillText(label, textX, y)
+        const width = textX + context.measureText(label).width - iconX
+        context.restore()
+
+        purchaseHitRegions.push({
+          id: definition.id,
+          x: iconX,
+          y: iconY,
+          width,
+          height: Math.max(24 * iconScale, fontSize + 6),
+        })
+        y += Math.max(30, fontSize + 12)
+      })
+
+      if (twinesScratched >= humanHandsDefinition.cost) {
+        const label =
+          humanHandsLevel > 0
+            ? `${humanHandsDefinition.label} ×${humanHandsLevel}`
+            : humanHandsDefinition.label
+        const handScale = fontSize / 22
+        const handX = 9
+        const handY = y - 3
+        const textX = 38
+
+        drawHand(context, {
+          color: humanHandsDefinition.color,
+          x: handX,
+          y: handY,
+          scale: handScale,
+          strokeWidth: Math.max(1.5, fontSize * 0.11) / handScale,
+          anchorX: 0,
+          anchorY: 0,
         })
 
         context.save()
@@ -1188,18 +1826,17 @@ function createScratchPostApp(): MicroApp {
         context.strokeText(label, textX, y)
         context.fillStyle = '#fff'
         context.fillText(label, textX, y)
-        const width = textX + context.measureText(label).width - pawX
+        const width = textX + context.measureText(label).width - handX
         context.restore()
 
         purchaseHitRegions.push({
-          id: definition.id,
-          x: pawX,
-          y: pawY,
+          id: humanHandsDefinition.id,
+          x: handX,
+          y: handY,
           width,
-          height: Math.max(24 * pawScale, fontSize + 6),
+          height: Math.max(24 * handScale, fontSize + 6),
         })
-        y += Math.max(30, fontSize + 12)
-      })
+      }
     }
 
     const shedTwine = (
@@ -1423,18 +2060,30 @@ function createScratchPostApp(): MicroApp {
           pose.y -
           Math.sin(pose.angle) * (centerToeDistance - scratchOffset)
 
-        drawPaw(context, {
-          color: definition.color,
-          x: pawX,
-          y: pawY,
-          scale: pawScale,
-          rotation: pose.angle - pawForwardAngle,
-          alpha: 0.92,
-          strokeColor: 'rgba(42, 31, 22, 0.9)',
-          strokeWidth: 2.2 / pawScale,
-          anchorX: pawPalmCenter.x,
-          anchorY: pawPalmCenter.y,
-        })
+        if (definition.icon === 'talon') {
+          drawTalon(context, {
+            color: definition.color,
+            x: pawX,
+            y: pawY,
+            scale: pawScale,
+            rotation: 0,
+            alpha: 0.94,
+            strokeWidth: 1.7 / pawScale,
+          })
+        } else {
+          drawPaw(context, {
+            color: definition.color,
+            x: pawX,
+            y: pawY,
+            scale: pawScale,
+            rotation: pose.angle - pawForwardAngle,
+            alpha: 0.92,
+            strokeColor: 'rgba(42, 31, 22, 0.9)',
+            strokeWidth: 2.2 / pawScale,
+            anchorX: pawPalmCenter.x,
+            anchorY: pawPalmCenter.y,
+          })
+        }
       })
     }
 
@@ -1517,6 +2166,7 @@ function createScratchPostApp(): MicroApp {
     }
 
     const hasAutoScratchers = () =>
+      humanHandsLevel > 0 ||
       autoScratcherDefinitions.some(
         (definition) => autoScratchers[definition.id].actors.length > 0
       )
@@ -1545,10 +2195,12 @@ function createScratchPostApp(): MicroApp {
         layout.height
       )
       advanceAutoScratcherCountdowns(timestamp)
+      advanceHumanHandSweep(timestamp, layout)
       updateTwines(timestamp, layout)
       drawTwines(timestamp, offsetX, offsetY)
       drawAutoScratcherPaws(timestamp, layout)
       emitDueAutoScratches(timestamp, layout)
+      drawHumanHandSweep(timestamp, layout)
       drawTwineCounter()
       drawAutoScratcherOptions()
       lastFrameAt = timestamp
@@ -1608,7 +2260,20 @@ function createScratchPostApp(): MicroApp {
           y <= region.y + region.height
       )
 
-    const buyAutoScratcher = (id: AutoScratcherId) => {
+    const buyUpgrade = (id: PurchaseId) => {
+      if (id === humanHandsId) {
+        if (twinesScratched < humanHandsDefinition.cost) return
+
+        twinesScratched -= humanHandsDefinition.cost
+        twinesScratchedDirty = true
+        humanHandsLevel += 1
+        humanHandsPurchasedThisMount += 1
+        autoScratchersDirty = true
+        scratchAudio.playDing()
+        requestDraw()
+        return
+      }
+
       const definition = autoScratcherDefinitions.find((candidate) => candidate.id === id)
       if (!definition || twinesScratched < definition.cost) return
 
@@ -1623,7 +2288,10 @@ function createScratchPostApp(): MicroApp {
 
       if (id === 'clawless-bapper') scratchAudio.playThump()
       else if (id === 'kitty-claws') scratchAudio.playMew()
-      else scratchAudio.playRoar()
+      else if (id === 'tiger-claws') scratchAudio.playRoar(1.3)
+      else if (id === 'bear-claws') scratchAudio.playRoar(0.78)
+      else if (id === 'raptor-talon') scratchAudio.playScreech(1.35)
+      else scratchAudio.playScreech(0.42)
       requestDraw()
     }
 
@@ -1636,7 +2304,7 @@ function createScratchPostApp(): MicroApp {
 
       event.preventDefault()
       resetPointer()
-      buyAutoScratcher(purchase.id)
+      buyUpgrade(purchase.id)
     }
 
     const recordMovement = (event: PointerEvent) => {

@@ -39,6 +39,25 @@ button {
   background: transparent;
 }
 
+.debug-shortcut {
+  position: absolute;
+  top: 104px;
+  left: 14px;
+  width: 96px;
+  padding: 5px 7px;
+  color: #111;
+  background: #c0c0c0;
+  border: 2px outset #fff;
+}
+
+.debug-shortcut:active {
+  border-style: inset;
+}
+
+.debug-shortcut:disabled {
+  color: #666;
+}
+
 .shortcut-icon,
 .title-icon {
   background: #88c79a url("../assets/scratch-post.webp") center 38% / 88% auto no-repeat;
