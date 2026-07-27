@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "The Scratch Post canvas micro app for FurSquared",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "sideEffects": false,
   "files": [
     "assets",
