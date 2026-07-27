@@ -5,12 +5,8 @@
     "moduleResolution": "Bundler",
     "lib": ["DOM", "ES2022"],
     "strict": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "noEmit": true,
+    "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["dev", "src"]
 }
-

@@ -1,0 +1,158 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-family: "MS Sans Serif", Tahoma, sans-serif;
+}
+
+button {
+  font: inherit;
+}
+
+.desktop {
+  position: relative;
+  height: 100%;
+  min-height: 520px;
+  overflow: hidden;
+  color: #111;
+  background:
+    linear-gradient(90deg, rgb(0 255 255 / 0.08) 1px, transparent 1px),
+    linear-gradient(rgb(255 0 255 / 0.08) 1px, transparent 1px),
+    #020049;
+  background-size: 8px 8px;
+}
+
+.desktop-shortcut {
+  position: absolute;
+  top: 20px;
+  left: 18px;
+  display: grid;
+  width: 88px;
+  gap: 5px;
+  color: #fff;
+  border: 0;
+  background: transparent;
+}
+
+.shortcut-icon,
+.title-icon {
+  background: #88c79a url("../assets/scratch-post.webp") center 38% / 88% auto no-repeat;
+}
+
+.shortcut-icon {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin: auto;
+  border: 2px outset #c0c0c0;
+}
+
+.window {
+  position: absolute;
+  top: 25px;
+  left: 150px;
+  display: flex;
+  width: 430px;
+  height: min(620px, calc(100vh - 55px));
+  min-width: 290px;
+  min-height: 420px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 55px);
+  resize: both;
+  overflow: hidden;
+  flex-direction: column;
+  padding: 2px;
+  background: #c0c0c0;
+  border: 2px outset #fff;
+  box-shadow: 2px 2px #000;
+}
+
+.window[hidden] {
+  display: none;
+}
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 25px;
+  padding: 2px 3px;
+  color: #fff;
+  background: #000080;
+  cursor: move;
+  touch-action: none;
+}
+
+.title-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+}
+
+.window-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.window-buttons button,
+.taskbar button {
+  min-width: 24px;
+  border: 2px outset #fff;
+  background: #c0c0c0;
+}
+
+.window-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(255 255 255 / 0.72), transparent 62%),
+    #88c79a;
+  border: 2px inset #fff;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.window-body:active {
+  cursor: grabbing;
+}
+
+#app-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.taskbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  height: 38px;
+  gap: 7px;
+  padding: 4px;
+  background: #c0c0c0;
+  border-top: 2px outset #fff;
+}
+
+.taskbar span {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 2px inset #fff;
+}
+
+.start-button {
+  font-weight: 700;
+}
+

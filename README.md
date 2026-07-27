@@ -18,9 +18,11 @@ The host owns the shared `AudioContext` and a gain bus for this app. Scratch Pos
 
 ```sh
 npm install
+npm run dev
 npm test
 npm run build
 ```
 
-Publishing a `v*` tag runs the package checks and publishes the matching package version and image asset to GitHub Packages.
+The Vite playground provides a draggable, resizable desktop window and exercises mount, resize, audio unlock, suspend, activate, destroy, and reopen behavior using `assets/scratch-post.webp`. Its shell lives outside the package `files` allowlist.
 
+Publishing a `v*` tag runs the package checks and publishes the matching package version and image asset to GitHub Packages.

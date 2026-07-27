@@ -25,13 +25,14 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "dev": "vite",
+    "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "npm run typecheck",
     "prepack": "npm run build"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.2"
   }
 }
-
