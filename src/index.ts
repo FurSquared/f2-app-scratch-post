@@ -2,6 +2,7 @@ const motionMargin = 10
 const inputHoldMilliseconds = 250
 const intensityWindowMilliseconds = 120
 const audioFadeSeconds = 0.1
+const dingDurationSeconds = 0.8
 const gravity = 620
 const maximumTwines = 1_000
 const minimumTwineIntervalMilliseconds = 100
@@ -18,6 +19,7 @@ const humanHandsCost = 1_000_000_000
 const humanHandsBaseCycleMilliseconds = 8_000
 const humanHandsBaseSweepMilliseconds = 1_800
 const humanHandsBaseTurnMilliseconds = 550
+const nextDingAtByAudioContext = new WeakMap<AudioContext, number>()
 
 type AutoScratcherId =
   | 'clawless-bapper'
@@ -706,10 +708,14 @@ function createScratchAudio(audio?: MicroAppAudio) {
 
   const playDing = () => {
     if (destroyed) return
-    audio.resume()
 
     const now = context.currentTime
-    const duration = 0.8
+    const nextDingAt = nextDingAtByAudioContext.get(context) ?? Number.NEGATIVE_INFINITY
+    if (now < nextDingAt) return
+
+    nextDingAtByAudioContext.set(context, now + dingDurationSeconds)
+    audio.resume()
+
     const fundamental = context.createOscillator()
     const overtone = context.createOscillator()
     const overtoneGain = context.createGain()
@@ -724,13 +730,13 @@ function createScratchAudio(audio?: MicroAppAudio) {
     overtoneGain.gain.value = 0.24
     envelope.gain.setValueAtTime(0.0001, now)
     envelope.gain.exponentialRampToValueAtTime(0.12, now + 0.008)
-    envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + dingDurationSeconds)
 
     fundamental.connect(envelope)
     overtone.connect(overtoneGain)
     overtoneGain.connect(envelope)
     envelope.connect(audio.destination)
-    scheduleSound(sources, nodes, now, duration)
+    scheduleSound(sources, nodes, now, dingDurationSeconds)
   }
 
   const playThump = () => {
