@@ -1035,6 +1035,7 @@ function createScratchPostApp(): MicroApp {
       width: number
       height: number
     }> = []
+    const announcedTwineDingCounts = new Set<number>()
     let appActive = false
 
     const staggerAutoScratcherActors = (
@@ -1080,11 +1081,18 @@ function createScratchPostApp(): MicroApp {
         }
       })
 
-      dingCounts.forEach((dingCount) => {
-        if (previousCount < dingCount && nextCount >= dingCount) {
-          scratchAudio.playDing()
-        }
+      const crossedDingCounts = [...dingCounts].filter(
+        (dingCount) =>
+          !announcedTwineDingCounts.has(dingCount) &&
+          previousCount < dingCount &&
+          nextCount >= dingCount
+      )
+      if (!crossedDingCounts.length) return
+
+      crossedDingCounts.forEach((dingCount) => {
+        announcedTwineDingCounts.add(dingCount)
       })
+      scratchAudio.playDing()
     }
 
     const activateScratchCounter = () => {
