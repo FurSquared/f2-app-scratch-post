@@ -9,11 +9,24 @@ const canvas = document.querySelector<HTMLCanvasElement>('#app-canvas')!
 const titleBar = document.querySelector<HTMLElement>('#title-bar')!
 const desktopShortcut = document.querySelector<HTMLButtonElement>('#desktop-shortcut')!
 const addBillionPointsButton = document.querySelector<HTMLButtonElement>('#add-billion-points')!
+const subtractAllPointsButton =
+  document.querySelector<HTMLButtonElement>('#subtract-all-points')!
+const removeTopAutoScratcherButton = document.querySelector<HTMLButtonElement>(
+  '#remove-top-auto-scratcher'
+)!
 const taskButton = document.querySelector<HTMLButtonElement>('#task-button')!
 const minimizeButton = document.querySelector<HTMLButtonElement>('#minimize')!
 const closeButton = document.querySelector<HTMLButtonElement>('#close')!
 const status = document.querySelector<HTMLElement>('#status')!
 const storage = createMicroAppStorage(scratchPostApp.manifest.id)
+const autoScratcherIdsByTier = [
+  'clawless-bapper',
+  'kitty-claws',
+  'tiger-claws',
+  'bear-claws',
+  'raptor-talon',
+  'dragon-talon',
+] as const
 
 let sharedAudioContext: AudioContext | undefined
 let appAudioGain: GainNode | undefined
@@ -160,8 +173,14 @@ const close = () => {
   updateStatus()
 }
 
+const setDebugControlsDisabled = (disabled: boolean) => {
+  addBillionPointsButton.disabled = disabled
+  subtractAllPointsButton.disabled = disabled
+  removeTopAutoScratcherButton.disabled = disabled
+}
+
 const addBillionPoints = async () => {
-  addBillionPointsButton.disabled = true
+  setDebugControlsDisabled(true)
   close()
 
   try {
@@ -176,7 +195,52 @@ const addBillionPoints = async () => {
     ])
   } finally {
     open()
-    addBillionPointsButton.disabled = false
+    setDebugControlsDisabled(false)
+  }
+}
+
+const subtractAllPoints = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    await storage.set('twines-scratched', 0)
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
+const removeTopAutoScratcher = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    const storedAutoScratchers = await storage.get<Record<string, unknown>>('auto-scratchers')
+    if (!storedAutoScratchers) {
+      return
+    }
+
+    let topPurchasedId: (typeof autoScratcherIdsByTier)[number] | undefined
+    for (let index = autoScratcherIdsByTier.length - 1; index >= 0; index -= 1) {
+      const id = autoScratcherIdsByTier[index]
+      const count = storedAutoScratchers[id]
+      if (typeof count === 'number' && Number.isSafeInteger(count) && count > 0) {
+        topPurchasedId = id
+        break
+      }
+    }
+    if (!topPurchasedId) {
+      return
+    }
+
+    await storage.set('auto-scratchers', {
+      ...storedAutoScratchers,
+      [topPurchasedId]: 0,
+    })
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
   }
 }
 
@@ -197,6 +261,12 @@ minimizeButton.addEventListener('click', minimize)
 closeButton.addEventListener('click', close)
 addBillionPointsButton.addEventListener('click', () => {
   void addBillionPoints()
+})
+subtractAllPointsButton.addEventListener('click', () => {
+  void subtractAllPoints()
+})
+removeTopAutoScratcherButton.addEventListener('click', () => {
+  void removeTopAutoScratcher()
 })
 
 let drag:
