@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.7](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.6...v0.4.7) (2026-07-28)
+
+
+### Bug Fixes
+
+* resume audio on touch start ([1a50a09](https://github.com/FurSquared/f2-app-scratch-post/commit/1a50a09fa41687acf3678ef5babc42c353cba24b))
+
 ## [0.4.6](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.5...v0.4.6) (2026-07-28)
 
 
