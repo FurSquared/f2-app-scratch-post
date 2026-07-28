@@ -179,10 +179,16 @@ export type MicroAppViewport = {
   backingHeight: number
 }
 
-export type MicroAppAudio = {
+export type MicroAppAudioEndpoint = {
   context: AudioContext
   destination: AudioNode
+}
+
+export type MicroAppAudio = MicroAppAudioEndpoint & {
   resume: () => void
+  onRecovered?: (
+    callback: (endpoint: MicroAppAudioEndpoint) => void
+  ) => () => void
 }
 
 export type MicroAppStorage = {
@@ -613,45 +619,90 @@ function createScratchAudio(audio?: MicroAppAudio) {
     }
   }
 
-  const { context } = audio
-  const source = context.createBufferSource()
-  const filter = context.createBiquadFilter()
-  const gain = context.createGain()
-  const warble = context.createOscillator()
-  const warbleGain = context.createGain()
-  const tremoloGain = context.createGain()
-  const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate)
-  const samples = buffer.getChannelData(0)
+  type PersistentGraph = {
+    source: AudioBufferSourceNode
+    filter: BiquadFilterNode
+    gain: GainNode
+    warble: OscillatorNode
+    warbleGain: GainNode
+    tremoloGain: GainNode
+  }
+
+  let currentAudio = audio
   const activeSounds = new Set<{
     sources: AudioScheduledSourceNode[]
     nodes: AudioNode[]
   }>()
   let destroyed = false
+  let lastIntensity = 0
 
-  for (let index = 0; index < samples.length; index += 1) {
-    samples[index] = Math.random() * 2 - 1
+  const createPersistentGraph = ({
+    context,
+    destination,
+  }: MicroAppAudioEndpoint): PersistentGraph => {
+    const source = context.createBufferSource()
+    const filter = context.createBiquadFilter()
+    const gain = context.createGain()
+    const warble = context.createOscillator()
+    const warbleGain = context.createGain()
+    const tremoloGain = context.createGain()
+    const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate)
+    const samples = buffer.getChannelData(0)
+
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = Math.random() * 2 - 1
+    }
+
+    source.buffer = buffer
+    source.loop = true
+    filter.type = 'lowpass'
+    filter.frequency.value = 650 + lastIntensity * 1900
+    filter.Q.value = 1.2
+    gain.gain.value = lastIntensity * 0.13
+    warble.type = 'triangle'
+    warble.frequency.value = 18 + lastIntensity * 16
+    warbleGain.gain.value = lastIntensity * 520
+    tremoloGain.gain.value = lastIntensity * 0.026
+
+    source.connect(filter)
+    filter.connect(gain)
+    gain.connect(destination)
+    warble.connect(warbleGain)
+    warble.connect(tremoloGain)
+    warbleGain.connect(filter.detune)
+    tremoloGain.connect(gain.gain)
+    source.start()
+    warble.start()
+
+    return { source, filter, gain, warble, warbleGain, tremoloGain }
   }
 
-  source.buffer = buffer
-  source.loop = true
-  filter.type = 'lowpass'
-  filter.frequency.value = 700
-  filter.Q.value = 1.2
-  gain.gain.value = 0
-  warble.type = 'triangle'
-  warble.frequency.value = 18
-  warbleGain.gain.value = 0
-  tremoloGain.gain.value = 0
+  const destroyPersistentGraph = (graph: PersistentGraph) => {
+    graph.source.stop()
+    graph.warble.stop()
+    graph.source.disconnect()
+    graph.filter.disconnect()
+    graph.gain.disconnect()
+    graph.warble.disconnect()
+    graph.warbleGain.disconnect()
+    graph.tremoloGain.disconnect()
+  }
 
-  source.connect(filter)
-  filter.connect(gain)
-  gain.connect(audio.destination)
-  warble.connect(warbleGain)
-  warble.connect(tremoloGain)
-  warbleGain.connect(filter.detune)
-  tremoloGain.connect(gain.gain)
-  source.start()
-  warble.start()
+  const stopActiveSounds = () => {
+    activeSounds.forEach(({ sources, nodes }) => {
+      sources.forEach((soundSource) => {
+        try {
+          soundSource.stop()
+        } catch {
+          // The source may already have ended during audio recovery.
+        }
+      })
+      nodes.forEach((node) => node.disconnect())
+    })
+    activeSounds.clear()
+  }
+
+  let persistentGraph = createPersistentGraph(currentAudio)
 
   const cancelScheduledChanges = (parameter: AudioParam, time: number) => {
     if (typeof parameter.cancelAndHoldAtTime === 'function') {
@@ -666,9 +717,12 @@ function createScratchAudio(audio?: MicroAppAudio) {
 
   const setIntensity = (intensity: number, rampSeconds = 0.025) => {
     if (destroyed) return
-    if (intensity > 0) audio.resume()
+    if (intensity > 0) currentAudio.resume()
 
     const normalizedIntensity = Math.max(0, Math.min(1, intensity))
+    lastIntensity = normalizedIntensity
+    const { context } = currentAudio
+    const { gain, filter, warble, warbleGain, tremoloGain } = persistentGraph
     const now = context.currentTime
     const gainValue = gain.gain
     const filterFrequency = filter.frequency
@@ -709,12 +763,13 @@ function createScratchAudio(audio?: MicroAppAudio) {
   const playDing = () => {
     if (destroyed) return
 
+    const { context, destination } = currentAudio
     const now = context.currentTime
     const nextDingAt = nextDingAtByAudioContext.get(context) ?? Number.NEGATIVE_INFINITY
     if (now < nextDingAt) return
 
     nextDingAtByAudioContext.set(context, now + dingDurationSeconds)
-    audio.resume()
+    currentAudio.resume()
 
     const fundamental = context.createOscillator()
     const overtone = context.createOscillator()
@@ -735,14 +790,15 @@ function createScratchAudio(audio?: MicroAppAudio) {
     fundamental.connect(envelope)
     overtone.connect(overtoneGain)
     overtoneGain.connect(envelope)
-    envelope.connect(audio.destination)
+    envelope.connect(destination)
     scheduleSound(sources, nodes, now, dingDurationSeconds)
   }
 
   const playThump = () => {
     if (destroyed) return
-    audio.resume()
+    currentAudio.resume()
 
+    const { context, destination } = currentAudio
     const now = context.currentTime
     const duration = 0.3
     const oscillator = context.createOscillator()
@@ -754,14 +810,15 @@ function createScratchAudio(audio?: MicroAppAudio) {
     envelope.gain.exponentialRampToValueAtTime(0.2, now + 0.006)
     envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration)
     oscillator.connect(envelope)
-    envelope.connect(audio.destination)
+    envelope.connect(destination)
     scheduleSound([oscillator], [oscillator, envelope], now, duration)
   }
 
   const playMew = () => {
     if (destroyed) return
-    audio.resume()
+    currentAudio.resume()
 
+    const { context, destination } = currentAudio
     const now = context.currentTime
     const duration = 0.65
     const voice = context.createOscillator()
@@ -782,7 +839,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
     vibrato.connect(vibratoDepth)
     vibratoDepth.connect(voice.frequency)
     voice.connect(envelope)
-    envelope.connect(audio.destination)
+    envelope.connect(destination)
     scheduleSound(
       [voice, vibrato],
       [voice, vibrato, vibratoDepth, envelope],
@@ -793,8 +850,9 @@ function createScratchAudio(audio?: MicroAppAudio) {
 
   const playScreech = (pitchScale = 1) => {
     if (destroyed) return
-    audio.resume()
+    currentAudio.resume()
 
+    const { context, destination } = currentAudio
     const now = context.currentTime
     const duration = 0.9
     const normalizedPitchScale = Math.max(0.35, Math.min(1.6, pitchScale))
@@ -840,7 +898,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
     overtone.connect(overtoneGain)
     overtoneGain.connect(filter)
     filter.connect(envelope)
-    envelope.connect(audio.destination)
+    envelope.connect(destination)
     scheduleSound(
       [voice, overtone, vibrato],
       [
@@ -859,8 +917,9 @@ function createScratchAudio(audio?: MicroAppAudio) {
 
   const playRoar = (pitchScale = 1) => {
     if (destroyed) return
-    audio.resume()
+    currentAudio.resume()
 
+    const { context, destination } = currentAudio
     const now = context.currentTime
     const duration = 1.15
     const normalizedPitchScale = Math.max(0.5, Math.min(1.5, pitchScale))
@@ -902,7 +961,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
     growl.connect(growlGain)
     growlGain.connect(filter)
     filter.connect(envelope)
-    envelope.connect(audio.destination)
+    envelope.connect(destination)
     scheduleSound(
       [noise, growl],
       [noise, growl, growlGain, filter, envelope],
@@ -910,6 +969,15 @@ function createScratchAudio(audio?: MicroAppAudio) {
       duration
     )
   }
+
+  const unsubscribeFromRecovery = audio.onRecovered?.((endpoint) => {
+    if (destroyed) return
+
+    stopActiveSounds()
+    destroyPersistentGraph(persistentGraph)
+    currentAudio = { ...currentAudio, ...endpoint }
+    persistentGraph = createPersistentGraph(currentAudio)
+  })
 
   return {
     setIntensity,
@@ -921,19 +989,9 @@ function createScratchAudio(audio?: MicroAppAudio) {
     destroy() {
       if (destroyed) return
       destroyed = true
-      activeSounds.forEach(({ sources, nodes }) => {
-        sources.forEach((soundSource) => soundSource.stop())
-        nodes.forEach((node) => node.disconnect())
-      })
-      activeSounds.clear()
-      source.stop()
-      warble.stop()
-      source.disconnect()
-      filter.disconnect()
-      gain.disconnect()
-      warble.disconnect()
-      warbleGain.disconnect()
-      tremoloGain.disconnect()
+      unsubscribeFromRecovery?.()
+      stopActiveSounds()
+      destroyPersistentGraph(persistentGraph)
     },
   }
 }

@@ -12,7 +12,7 @@ The package exports a versioned definition with a small lifecycle:
 - `resize` receives the canvas content size and device pixel ratio.
 - `destroy` releases animation, input, image, and audio resources.
 
-The host owns the shared `AudioContext` and a gain bus for this app. Scratch Post owns and disconnects the audio nodes connected to that bus. Storage is used to keep track of player progress.
+The host owns the shared `AudioContext` and a gain bus for this app. Scratch Post owns and disconnects the audio nodes connected to that bus. A host that restarts audio after a browser interruption can provide `audio.onRecovered`; Scratch Post then rebuilds only its audio graph without disrupting visual, input, or progress state. Storage is used to keep track of player progress.
 
 ## Development
 
