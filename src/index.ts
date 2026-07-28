@@ -611,6 +611,7 @@ function drawHand(
 function createScratchAudio(audio?: MicroAppAudio) {
   if (!audio) {
     return {
+      resume: () => {},
       setIntensity: (_intensity: number, _rampSeconds?: number) => {},
       playDing: () => {},
       playThump: () => {},
@@ -967,6 +968,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
   })
 
   return {
+    resume: () => currentAudio.resume(),
     setIntensity,
     playDing,
     playThump,
@@ -2397,6 +2399,10 @@ function createScratchPostApp(): MicroApp {
         buyUpgrade(purchase.id)
       }
 
+      const handleTouchStart = () => {
+        scratchAudio.resume()
+      }
+
       const recordMovement = (event: PointerEvent) => {
         if (!appActive) {
           return
@@ -2465,6 +2471,7 @@ function createScratchPostApp(): MicroApp {
       image.src = host.imageUrl
 
       surface.addEventListener('pointerdown', handlePointerDown)
+      surface.addEventListener('touchstart', handleTouchStart, { passive: true })
       surface.addEventListener('pointermove', recordMovement)
       surface.addEventListener('pointerleave', handlePointerLeave)
       surface.addEventListener('pointerup', resetPointer)
@@ -2521,6 +2528,7 @@ function createScratchPostApp(): MicroApp {
         mounted = false
         image.removeEventListener('load', handleImageLoad)
         surface.removeEventListener('pointerdown', handlePointerDown)
+        surface.removeEventListener('touchstart', handleTouchStart)
         surface.removeEventListener('pointermove', recordMovement)
         surface.removeEventListener('pointerleave', handlePointerLeave)
         surface.removeEventListener('pointerup', resetPointer)
