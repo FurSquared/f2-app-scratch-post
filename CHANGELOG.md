@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.7...v0.5.0) (2026-07-28)
+
+
+### Features
+
+* emphasize affordable purchase milestones ([83184c0](https://github.com/FurSquared/f2-app-scratch-post/commit/83184c06b46c064711b82cf1a9f0d1b26d5c76c8))
+
 ## [0.4.7](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.6...v0.4.7) (2026-07-28)
 
 
