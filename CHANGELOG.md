@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.5...v0.4.6) (2026-07-28)
+
+
+### Bug Fixes
+
+* enforce control flow braces with oxlint ([ac88472](https://github.com/FurSquared/f2-app-scratch-post/commit/ac8847253a9b7896652c57bbb8030e95fd580e8d))
+
 ## [0.4.5](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.4...v0.4.5) (2026-07-28)
 
 
