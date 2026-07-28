@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.4...v0.4.5) (2026-07-28)
+
+
+### Bug Fixes
+
+* align talons with scratch direction ([eab335e](https://github.com/FurSquared/f2-app-scratch-post/commit/eab335ed29c3c35b58cc37c6e352faf1365452bc))
+
 ## [0.4.4](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.3...v0.4.4) (2026-07-28)
 
 
