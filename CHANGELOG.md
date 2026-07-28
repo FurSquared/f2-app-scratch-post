@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.3...v0.4.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* continue auto-scratcher progress while suspended ([ec8f7de](https://github.com/FurSquared/f2-app-scratch-post/commit/ec8f7de24da3324195bdc0845c1ec41f4f3ba121))
+
 ## [0.4.3](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.2...v0.4.3) (2026-07-28)
 
 
