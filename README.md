@@ -8,7 +8,7 @@ The package exports a versioned definition with a small lifecycle:
 
 - `mount` receives host-owned surface and canvas elements, a frame scheduler, the packaged image URL, and optional host-owned services.
 - `activate` enables drawing and pointer interaction.
-- `suspend` stops drawing and fades audio while the window or page is hidden.
+- `suspend` stops drawing, pauses canvas simulation, and fades audio while the window or page is hidden. Purchased auto-scratchers continue advancing the persisted counter for as long as the app remains mounted.
 - `resize` receives the canvas content size and device pixel ratio.
 - `destroy` releases animation, input, image, and audio resources.
 

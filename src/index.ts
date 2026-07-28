@@ -1101,6 +1101,8 @@ function createScratchPostApp(): MicroApp {
     }> = []
     const announcedTwineDingCounts = new Set<number>()
     let appActive = false
+    let lastAutomaticProgressAt = performance.now()
+    let suspendedAt: number | undefined
 
     const staggerAutoScratcherActors = (
       definition: AutoScratcherDefinition,
@@ -1167,15 +1169,24 @@ function createScratchPostApp(): MicroApp {
       }
     }
 
-    const recordTwineScratched = () => {
+    const recordTwinesScratched = (count = 1) => {
+      const validCount = Math.max(
+        0,
+        Math.min(
+          Number.MAX_SAFE_INTEGER - twinesScratched,
+          Math.floor(count)
+        )
+      )
+      if (!validCount) return
+
       const previousCount = twinesScratched
-      twinesScratched += 1
-      twinesScratchedThisMount += 1
+      twinesScratched += validCount
+      twinesScratchedThisMount += validCount
       twinesScratchedDirty = true
       if (previousCount < twineCounterRevealCount && twinesScratched >= twineCounterRevealCount) {
         activateScratchCounter()
       }
-      if (twinesScratchedLoaded) {
+      if (twinesScratchedLoaded && appActive) {
         playCrossedTwineDings(previousCount, twinesScratched)
       }
     }
@@ -1305,9 +1316,6 @@ function createScratchPostApp(): MicroApp {
     }
 
     void loadAppState()
-    const storageSyncHandle = setInterval(() => {
-      void persistAppState()
-    }, storageSyncMilliseconds)
 
     const imageLayout = () => {
       const availableWidth = displayWidth - motionMargin * 2
@@ -1925,7 +1933,7 @@ function createScratchPostApp(): MicroApp {
     ) => {
       if (!imageReady || distance <= 0) return false
       if (!createParticle || twines.length >= maximumTwines) {
-        if (countWhenParticleLimitReached) recordTwineScratched()
+        if (countWhenParticleLimitReached) recordTwinesScratched()
         return countWhenParticleLimitReached
       }
 
@@ -1950,7 +1958,7 @@ function createScratchPostApp(): MicroApp {
         lifetime: 3000 + Math.random() * 7000,
         settled: false,
       })
-      recordTwineScratched()
+      recordTwinesScratched()
       return true
     }
 
@@ -2071,9 +2079,11 @@ function createScratchPostApp(): MicroApp {
     }
 
     const advanceAutoScratcherCountdowns = (timestamp: number) => {
-      const elapsedSeconds = lastFrameAt
-        ? Math.min(0.034, (timestamp - lastFrameAt) / 1000)
-        : 0
+      const elapsedSeconds = Math.max(
+        0,
+        (timestamp - lastAutomaticProgressAt) / 1000
+      )
+      lastAutomaticProgressAt = timestamp
       if (!elapsedSeconds) return
 
       autoScratcherDefinitions.forEach((definition) => {
@@ -2159,7 +2169,11 @@ function createScratchPostApp(): MicroApp {
       })
     }
 
-    const emitDueAutoScratches = (timestamp: number, layout: ImageLayout) => {
+    const emitDueAutoScratches = (
+      timestamp: number,
+      layout?: ImageLayout,
+      createParticles = true
+    ) => {
       const dueBatches: Array<{
         definition: AutoScratcherDefinition
         visualActor: AutoScratcherActor
@@ -2174,10 +2188,12 @@ function createScratchPostApp(): MicroApp {
         const intervalSeconds = 1 / definition.twinesPerSecond
         let dueCount = 0
         state.actors.forEach((actor) => {
-          while (actor.countdownSeconds <= 0) {
-            dueCount += 1
-            actor.countdownSeconds += intervalSeconds
-          }
+          if (actor.countdownSeconds > 0) return
+
+          const actorDueCount =
+            Math.floor(-actor.countdownSeconds / intervalSeconds) + 1
+          dueCount += actorDueCount
+          actor.countdownSeconds += actorDueCount * intervalSeconds
         })
         if (dueCount > 0) {
           dueBatches.push({ definition, visualActor, count: dueCount })
@@ -2188,7 +2204,7 @@ function createScratchPostApp(): MicroApp {
       if (!totalDue) return
 
       const availableParticles = Math.min(
-        totalDue,
+        createParticles && layout ? totalDue : 0,
         Math.max(0, maximumTwines - twines.length)
       )
       const particleAllocations = Object.fromEntries(
@@ -2226,16 +2242,34 @@ function createScratchPostApp(): MicroApp {
 
       dueBatches.forEach((batch) => {
         const particleCount = particleAllocations[batch.definition.id]
-        for (let emission = 0; emission < batch.count; emission += 1) {
-          emitAutomaticTwine(
+        let recordedParticles = 0
+        for (let emission = 0; emission < particleCount; emission += 1) {
+          if (emitAutomaticTwine(
             batch.visualActor,
             timestamp,
-            layout,
-            emission < particleCount
-          )
+            layout!,
+            true
+          )) {
+            recordedParticles += 1
+          }
         }
+        recordTwinesScratched(batch.count - recordedParticles)
       })
     }
+
+    const advanceAutomaticProgress = (
+      timestamp: number,
+      layout?: ImageLayout,
+      createParticles = false
+    ) => {
+      advanceAutoScratcherCountdowns(timestamp)
+      emitDueAutoScratches(timestamp, layout, createParticles)
+    }
+
+    const storageSyncHandle = setInterval(() => {
+      advanceAutomaticProgress(performance.now())
+      void persistAppState()
+    }, storageSyncMilliseconds)
 
     const hasAutoScratchers = () =>
       humanHandsLevel > 0 ||
@@ -2271,7 +2305,7 @@ function createScratchPostApp(): MicroApp {
       updateTwines(timestamp, layout)
       drawTwines(timestamp, offsetX, offsetY)
       drawAutoScratcherPaws(timestamp, layout)
-      emitDueAutoScratches(timestamp, layout)
+      emitDueAutoScratches(timestamp, layout, true)
       drawHumanHandSweep(timestamp, layout)
       drawTwineCounter()
       drawAutoScratcherOptions()
@@ -2456,11 +2490,31 @@ function createScratchPostApp(): MicroApp {
 
       activateApp = () => {
         if (appActive) return
+        const timestamp = performance.now()
+        advanceAutomaticProgress(timestamp)
+        if (suspendedAt !== undefined) {
+          const suspendedMilliseconds = Math.max(0, timestamp - suspendedAt)
+          twines.forEach((twine) => {
+            twine.bornAt += suspendedMilliseconds
+          })
+          suspendedAt = undefined
+        }
+        lastFrameAt = timestamp
+        lastHumanHandAnimationAt = timestamp
+        autoScratcherDefinitions.forEach((definition) => {
+          autoScratchers[definition.id].actors.forEach((actor) => {
+            actor.lastVisualPoseAt = timestamp
+          })
+        })
         appActive = true
         requestDraw()
       }
       suspendApp = () => {
+        if (!appActive) return
+        const timestamp = performance.now()
+        advanceAutomaticProgress(timestamp, imageReady ? imageLayout() : undefined, imageReady)
         appActive = false
+        suspendedAt = timestamp
         if (animationFrame) host.cancelFrame(animationFrame)
         animationFrame = 0
         surface.style.cursor = originalCursor
@@ -2471,8 +2525,9 @@ function createScratchPostApp(): MicroApp {
       destroyApp = () => {
         if (!mounted) return
         clearInterval(storageSyncHandle)
-        void persistAppState()
         suspendApp()
+        advanceAutomaticProgress(performance.now())
+        void persistAppState()
         mounted = false
         image.removeEventListener('load', handleImageLoad)
       surface.removeEventListener('pointerdown', handlePointerDown)
