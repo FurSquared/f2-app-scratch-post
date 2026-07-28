@@ -19,6 +19,7 @@ const humanHandsCost = 1_000_000_000
 const humanHandsBaseCycleMilliseconds = 8_000
 const humanHandsBaseSweepMilliseconds = 1_800
 const humanHandsBaseTurnMilliseconds = 550
+const purchaseEmphasisMilliseconds = 700
 const nextDingAtByAudioContext = new WeakMap<AudioContext, number>()
 
 type AutoScratcherId =
@@ -1093,6 +1094,13 @@ function createScratchPostApp(): MicroApp {
         height: number
       }> = []
       const announcedTwineDingCounts = new Set<number>()
+      const purchaseEmphasis = new Map<
+        PurchaseId,
+        {
+          startedAt: number
+          multiple: number
+        }
+      >()
       let appActive = false
       let lastAutomaticProgressAt = performance.now()
       let suspendedAt: number | undefined
@@ -1127,35 +1135,43 @@ function createScratchPostApp(): MicroApp {
 
       const playCrossedTwineDings = (previousCount: number, nextCount: number) => {
         const productionRate = automaticTwinesPerSecond()
-        const dingCounts = new Set<number>()
-        const purchaseCosts = [
-          ...autoScratcherDefinitions.map((definition) => definition.cost),
-          humanHandsDefinition.cost,
+        const crossedDingCounts = new Set<number>()
+        const crossedPurchases = new Map<PurchaseId, number>()
+        const purchases = [
+          ...autoScratcherDefinitions.map(({ id, cost }) => ({ id, cost })),
+          { id: humanHandsDefinition.id, cost: humanHandsDefinition.cost },
         ]
 
-        purchaseCosts.forEach((cost) => {
+        purchases.forEach(({ id, cost }) => {
           if (productionRate > cost) {
             return
           }
           for (let multiple = 1; multiple <= 10; multiple += 1) {
-            dingCounts.add(cost * multiple)
+            const dingCount = cost * multiple
+            if (
+              !announcedTwineDingCounts.has(dingCount) &&
+              previousCount < dingCount &&
+              nextCount >= dingCount
+            ) {
+              crossedDingCounts.add(dingCount)
+              crossedPurchases.set(id, multiple)
+            }
           }
         })
 
-        const crossedDingCounts = [...dingCounts].filter(
-          (dingCount) =>
-            !announcedTwineDingCounts.has(dingCount) &&
-            previousCount < dingCount &&
-            nextCount >= dingCount
-        )
-        if (!crossedDingCounts.length) {
+        if (!crossedDingCounts.size) {
           return
         }
 
         crossedDingCounts.forEach((dingCount) => {
           announcedTwineDingCounts.add(dingCount)
         })
+        const startedAt = performance.now()
+        crossedPurchases.forEach((multiple, id) => {
+          purchaseEmphasis.set(id, { startedAt, multiple })
+        })
         scratchAudio.playDing()
+        requestDraw()
       }
 
       const activateScratchCounter = () => {
@@ -1783,7 +1799,42 @@ function createScratchPostApp(): MicroApp {
         context.restore()
       }
 
-      const drawAutoScratcherOptions = () => {
+      const applyPurchaseEmphasis = (
+        id: PurchaseId,
+        timestamp: number,
+        x: number,
+        y: number,
+        width: number,
+        height: number
+      ) => {
+        const emphasis = purchaseEmphasis.get(id)
+        if (!emphasis) {
+          return
+        }
+
+        const elapsed = timestamp - emphasis.startedAt
+        if (elapsed >= purchaseEmphasisMilliseconds) {
+          purchaseEmphasis.delete(id)
+          return
+        }
+
+        const progress = Math.max(0, elapsed / purchaseEmphasisMilliseconds)
+        const envelope = Math.sin(progress * Math.PI)
+        const strength = 0.12 + emphasis.multiple * 0.018
+        const shudder = envelope * (1.5 + emphasis.multiple * 0.35)
+        const centerX = x + width / 2
+        const centerY = y + height / 2
+        const offsetX = Math.sin(progress * Math.PI * 18) * shudder
+        const offsetY = Math.sin(progress * Math.PI * 23) * shudder * 0.55
+        const rotation = Math.sin(progress * Math.PI * 21) * shudder * 0.0025
+
+        context.translate(centerX + offsetX, centerY + offsetY)
+        context.rotate(rotation)
+        context.scale(1 + envelope * strength, 1 + envelope * strength)
+        context.translate(-centerX, -centerY)
+      }
+
+      const drawAutoScratcherOptions = (timestamp: number) => {
         purchaseHitRegions = []
         if (!twinesScratchedLoaded) {
           return
@@ -1803,6 +1854,11 @@ function createScratchPostApp(): MicroApp {
           const iconX = 9
           const iconY = y - 2
           const textX = 38
+          context.save()
+          context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+          const width = textX + context.measureText(label).width - iconX
+          const height = Math.max(24 * iconScale, fontSize + 6)
+          applyPurchaseEmphasis(definition.id, timestamp, iconX, iconY, width, height)
 
           if (definition.icon === 'talon') {
             drawTalon(context, {
@@ -1824,8 +1880,6 @@ function createScratchPostApp(): MicroApp {
             })
           }
 
-          context.save()
-          context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
           context.textBaseline = 'top'
           context.lineJoin = 'round'
           context.lineWidth = Math.max(3, fontSize * 0.18)
@@ -1833,7 +1887,6 @@ function createScratchPostApp(): MicroApp {
           context.strokeText(label, textX, y)
           context.fillStyle = '#fff'
           context.fillText(label, textX, y)
-          const width = textX + context.measureText(label).width - iconX
           context.restore()
 
           purchaseHitRegions.push({
@@ -1841,7 +1894,7 @@ function createScratchPostApp(): MicroApp {
             x: iconX,
             y: iconY,
             width,
-            height: Math.max(24 * iconScale, fontSize + 6),
+            height,
           })
           y += Math.max(30, fontSize + 12)
         })
@@ -1855,6 +1908,18 @@ function createScratchPostApp(): MicroApp {
           const handX = 9
           const handY = y - 3
           const textX = 38
+          context.save()
+          context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+          const width = textX + context.measureText(label).width - handX
+          const height = Math.max(24 * handScale, fontSize + 6)
+          applyPurchaseEmphasis(
+            humanHandsDefinition.id,
+            timestamp,
+            handX,
+            handY,
+            width,
+            height
+          )
 
           drawHand(context, {
             color: humanHandsDefinition.color,
@@ -1866,8 +1931,6 @@ function createScratchPostApp(): MicroApp {
             anchorY: 0,
           })
 
-          context.save()
-          context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
           context.textBaseline = 'top'
           context.lineJoin = 'round'
           context.lineWidth = Math.max(3, fontSize * 0.18)
@@ -1875,7 +1938,6 @@ function createScratchPostApp(): MicroApp {
           context.strokeText(label, textX, y)
           context.fillStyle = '#fff'
           context.fillText(label, textX, y)
-          const width = textX + context.measureText(label).width - handX
           context.restore()
 
           purchaseHitRegions.push({
@@ -1883,7 +1945,7 @@ function createScratchPostApp(): MicroApp {
             x: handX,
             y: handY,
             width,
-            height: Math.max(24 * handScale, fontSize + 6),
+            height,
           })
         }
       }
@@ -2286,7 +2348,7 @@ function createScratchPostApp(): MicroApp {
         emitDueAutoScratches(timestamp, layout, true)
         drawHumanHandSweep(timestamp, layout)
         drawTwineCounter()
-        drawAutoScratcherOptions()
+        drawAutoScratcherOptions(timestamp)
         lastFrameAt = timestamp
 
         if (!inputActive && !audioFading) {
