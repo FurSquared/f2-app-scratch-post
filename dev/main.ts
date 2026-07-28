@@ -1,8 +1,4 @@
-import scratchPostApp, {
-  type MicroApp,
-  type MicroAppActivation,
-  type MicroAppAudio,
-} from '../src'
+import scratchPostApp, { type MicroApp, type MicroAppActivation, type MicroAppAudio } from '../src'
 import { createMicroAppStorage } from './microAppStorage'
 import './styles.css'
 
@@ -12,8 +8,7 @@ const surface = document.querySelector<HTMLElement>('#app-surface')!
 const canvas = document.querySelector<HTMLCanvasElement>('#app-canvas')!
 const titleBar = document.querySelector<HTMLElement>('#title-bar')!
 const desktopShortcut = document.querySelector<HTMLButtonElement>('#desktop-shortcut')!
-const addBillionPointsButton =
-  document.querySelector<HTMLButtonElement>('#add-billion-points')!
+const addBillionPointsButton = document.querySelector<HTMLButtonElement>('#add-billion-points')!
 const taskButton = document.querySelector<HTMLButtonElement>('#task-button')!
 const minimizeButton = document.querySelector<HTMLButtonElement>('#minimize')!
 const closeButton = document.querySelector<HTMLButtonElement>('#close')!
@@ -27,7 +22,13 @@ let abortController: AbortController | undefined
 let minimized = false
 
 const updateStatus = () => {
-  const state = !app ? 'closed' : minimized ? 'suspended' : document.hidden ? 'page hidden' : 'active'
+  const state = !app
+    ? 'closed'
+    : minimized
+      ? 'suspended'
+      : document.hidden
+        ? 'page hidden'
+        : 'active'
   const audioState = sharedAudioContext?.state ?? 'not created'
   status.textContent = `${state} · audio ${audioState} · ${canvas.width}×${canvas.height}`
 }
@@ -37,11 +38,11 @@ const unlockAudio = () => {
     sharedAudioContext = new window.AudioContext()
     sharedAudioContext.addEventListener('statechange', updateStatus)
   }
-  if (
-    sharedAudioContext.state !== 'running' &&
-    sharedAudioContext.state !== 'closed'
-  ) {
-    void sharedAudioContext.resume().catch(() => {}).finally(updateStatus)
+  if (sharedAudioContext.state !== 'running' && sharedAudioContext.state !== 'closed') {
+    void sharedAudioContext
+      .resume()
+      .catch(() => {})
+      .finally(updateStatus)
   }
   updateStatus()
 }
@@ -60,7 +61,9 @@ const createAudioBus = (): MicroAppAudio => {
 }
 
 const setAudioActive = (active: boolean) => {
-  if (!sharedAudioContext || !appAudioGain) return
+  if (!sharedAudioContext || !appAudioGain) {
+    return
+  }
 
   const now = sharedAudioContext.currentTime
   appAudioGain.gain.cancelScheduledValues(now)
@@ -69,24 +72,34 @@ const setAudioActive = (active: boolean) => {
 }
 
 const resize = () => {
-  if (!app) return
+  if (!app) {
+    return
+  }
 
   const rect = surface.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return
+  if (rect.width <= 0 || rect.height <= 0) {
+    return
+  }
 
   const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2)
   const width = Math.max(1, rect.width)
   const height = Math.max(1, rect.height)
   const backingWidth = Math.max(1, Math.round(width * devicePixelRatio))
   const backingHeight = Math.max(1, Math.round(height * devicePixelRatio))
-  if (canvas.width !== backingWidth) canvas.width = backingWidth
-  if (canvas.height !== backingHeight) canvas.height = backingHeight
+  if (canvas.width !== backingWidth) {
+    canvas.width = backingWidth
+  }
+  if (canvas.height !== backingHeight) {
+    canvas.height = backingHeight
+  }
   app.resize({ width, height, devicePixelRatio, backingWidth, backingHeight })
   updateStatus()
 }
 
 const activate = (activation: MicroAppActivation) => {
-  if (!app || minimized || document.hidden) return
+  if (!app || minimized || document.hidden) {
+    return
+  }
   setAudioActive(true)
   app.activate(activation)
   updateStatus()
@@ -154,16 +167,11 @@ const addBillionPoints = async () => {
   try {
     const storedCount = await storage.get<number>('twines-scratched')
     const currentCount =
-      typeof storedCount === 'number' &&
-      Number.isSafeInteger(storedCount) &&
-      storedCount >= 0
+      typeof storedCount === 'number' && Number.isSafeInteger(storedCount) && storedCount >= 0
         ? storedCount
         : 0
     await storage.setMany([
-      [
-        'twines-scratched',
-        Math.min(Number.MAX_SAFE_INTEGER, currentCount + 1_000_000_000),
-      ],
+      ['twines-scratched', Math.min(Number.MAX_SAFE_INTEGER, currentCount + 1_000_000_000)],
       ['scratch-counter', true],
     ])
   } finally {
@@ -200,7 +208,9 @@ let drag:
   | undefined
 
 titleBar.addEventListener('pointerdown', (event) => {
-  if ((event.target as Element).closest('button')) return
+  if ((event.target as Element).closest('button')) {
+    return
+  }
   const rect = appWindow.getBoundingClientRect()
   drag = {
     pointerId: event.pointerId,
@@ -210,12 +220,16 @@ titleBar.addEventListener('pointerdown', (event) => {
   titleBar.setPointerCapture(event.pointerId)
 })
 titleBar.addEventListener('pointermove', (event) => {
-  if (drag?.pointerId !== event.pointerId) return
+  if (drag?.pointerId !== event.pointerId) {
+    return
+  }
   appWindow.style.left = `${Math.max(0, event.clientX - drag.offsetX)}px`
   appWindow.style.top = `${Math.max(0, event.clientY - drag.offsetY)}px`
 })
 titleBar.addEventListener('pointerup', (event) => {
-  if (drag?.pointerId === event.pointerId) titleBar.releasePointerCapture(event.pointerId)
+  if (drag?.pointerId === event.pointerId) {
+    titleBar.releasePointerCapture(event.pointerId)
+  }
   drag = undefined
 })
 

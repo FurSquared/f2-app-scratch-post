@@ -27,11 +27,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --project tsconfig.build.json",
+    "lint": "oxlint . --deny-warnings",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "npm run typecheck",
+    "test": "npm run lint && npm run typecheck",
     "prepack": "npm run build"
   },
   "devDependencies": {
+    "oxlint": "^1.76.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.2"
   }

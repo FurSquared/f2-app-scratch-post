@@ -13,7 +13,9 @@ type StoredEntry = {
 let databasePromise: Promise<IDBDatabase> | undefined
 
 function openDatabase() {
-  if (databasePromise) return databasePromise
+  if (databasePromise) {
+    return databasePromise
+  }
 
   databasePromise = new Promise((resolve, reject) => {
     const request = window.indexedDB.open(databaseName, databaseVersion)
@@ -63,7 +65,9 @@ function transactionComplete(transaction: IDBTransaction) {
 }
 
 function validateKey(key: string) {
-  if (!key || key.length > 128) throw new Error('Invalid micro-app storage key')
+  if (!key || key.length > 128) {
+    throw new Error('Invalid micro-app storage key')
+  }
 }
 
 function entryRange(appId: string, prefix = '') {
@@ -71,7 +75,9 @@ function entryRange(appId: string, prefix = '') {
 }
 
 export function createMicroAppStorage(appId: string): MicroAppStorage {
-  if (!appId) throw new Error('A micro-app id is required for storage')
+  if (!appId) {
+    throw new Error('A micro-app id is required for storage')
+  }
 
   return {
     async get<Value>(key: string) {
@@ -123,23 +129,27 @@ export function createMicroAppStorage(appId: string): MicroAppStorage {
       await transactionComplete(transaction)
     },
 
-    async entries<Value>(
-      {
-        prefix = '',
-        limit = 100,
-        cursor,
-      }: {
-        prefix?: string
-        limit?: number
-        cursor?: string
-      } = {}
-    ) {
-      if (prefix.length > 128) throw new Error('Invalid micro-app storage prefix')
+    async entries<Value>({
+      prefix = '',
+      limit = 100,
+      cursor,
+    }: {
+      prefix?: string
+      limit?: number
+      cursor?: string
+    } = {}) {
+      if (prefix.length > 128) {
+        throw new Error('Invalid micro-app storage prefix')
+      }
       if (cursor !== undefined) {
         validateKey(cursor)
-        if (!cursor.startsWith(prefix)) throw new Error('Invalid micro-app storage cursor')
+        if (!cursor.startsWith(prefix)) {
+          throw new Error('Invalid micro-app storage cursor')
+        }
       }
-      if (!Number.isFinite(limit)) throw new Error('Invalid micro-app storage page limit')
+      if (!Number.isFinite(limit)) {
+        throw new Error('Invalid micro-app storage page limit')
+      }
       const pageSize = Math.max(1, Math.min(1000, Math.floor(limit)))
       const database = await openDatabase()
       const transaction = database.transaction(entriesStoreName, 'readonly')
