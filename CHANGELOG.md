@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.2...v0.4.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* rebuild audio after host recovery ([17f22e5](https://github.com/FurSquared/f2-app-scratch-post/commit/17f22e5888e3d0795b2ae616748236c8b106220d))
+
 ## [0.4.2](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.1...v0.4.2) (2026-07-27)
 
 
