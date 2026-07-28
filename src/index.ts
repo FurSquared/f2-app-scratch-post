@@ -419,6 +419,7 @@ const pawForwardX = pawCenterToe.x - pawPalmCenter.x
 const pawForwardY = pawCenterToe.y - pawPalmCenter.y
 const pawForwardAngle = Math.atan2(pawForwardY, pawForwardX)
 const pawCenterToeDistance = Math.hypot(pawForwardX, pawForwardY)
+const talonForwardAngle = -Math.PI / 2
 
 export function drawPaw(
   context: CanvasRenderingContext2D,
@@ -2148,7 +2149,7 @@ function createScratchPostApp(): MicroApp {
             x: pawX,
             y: pawY,
             scale: pawScale,
-            rotation: 0,
+            rotation: pose.angle - talonForwardAngle,
             alpha: 0.94,
             strokeWidth: 1.7 / pawScale,
           })
