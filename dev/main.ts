@@ -11,6 +11,8 @@ const desktopShortcut = document.querySelector<HTMLButtonElement>('#desktop-shor
 const addBillionPointsButton = document.querySelector<HTMLButtonElement>('#add-billion-points')!
 const subtractAllPointsButton =
   document.querySelector<HTMLButtonElement>('#subtract-all-points')!
+const addHumanHandsButton = document.querySelector<HTMLButtonElement>('#add-human-hands')!
+const addDragonTalonsButton = document.querySelector<HTMLButtonElement>('#add-dragon-talons')!
 const removeTopAutoScratcherButton = document.querySelector<HTMLButtonElement>(
   '#remove-top-auto-scratcher'
 )!
@@ -176,6 +178,8 @@ const close = () => {
 const setDebugControlsDisabled = (disabled: boolean) => {
   addBillionPointsButton.disabled = disabled
   subtractAllPointsButton.disabled = disabled
+  addHumanHandsButton.disabled = disabled
+  addDragonTalonsButton.disabled = disabled
   removeTopAutoScratcherButton.disabled = disabled
 }
 
@@ -205,6 +209,48 @@ const subtractAllPoints = async () => {
 
   try {
     await storage.set('twines-scratched', 0)
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
+const addHumanHands = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    const storedAutoScratchers = await storage.get<Record<string, unknown>>('auto-scratchers')
+    const currentCount = storedAutoScratchers?.['human-hands']
+    const validCount =
+      typeof currentCount === 'number' && Number.isSafeInteger(currentCount) && currentCount >= 0
+        ? currentCount
+        : 0
+    await storage.set('auto-scratchers', {
+      ...storedAutoScratchers,
+      'human-hands': Math.min(Number.MAX_SAFE_INTEGER, validCount + 100),
+    })
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
+const addDragonTalons = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    const storedAutoScratchers = await storage.get<Record<string, unknown>>('auto-scratchers')
+    const currentCount = storedAutoScratchers?.['dragon-talon']
+    const validCount =
+      typeof currentCount === 'number' && Number.isSafeInteger(currentCount) && currentCount >= 0
+        ? currentCount
+        : 0
+    await storage.set('auto-scratchers', {
+      ...storedAutoScratchers,
+      'dragon-talon': Math.min(Number.MAX_SAFE_INTEGER, validCount + 100),
+    })
   } finally {
     open()
     setDebugControlsDisabled(false)
@@ -264,6 +310,12 @@ addBillionPointsButton.addEventListener('click', () => {
 })
 subtractAllPointsButton.addEventListener('click', () => {
   void subtractAllPoints()
+})
+addHumanHandsButton.addEventListener('click', () => {
+  void addHumanHands()
+})
+addDragonTalonsButton.addEventListener('click', () => {
+  void addDragonTalons()
 })
 removeTopAutoScratcherButton.addEventListener('click', () => {
   void removeTopAutoScratcher()
