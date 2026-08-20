@@ -12,6 +12,13 @@ const addBillionPointsButton = document.querySelector<HTMLButtonElement>('#add-b
 const subtractAllPointsButton =
   document.querySelector<HTMLButtonElement>('#subtract-all-points')!
 const addHumanHandsButton = document.querySelector<HTMLButtonElement>('#add-human-hands')!
+const removeAllHumanHandsButton =
+  document.querySelector<HTMLButtonElement>('#remove-all-human-hands')!
+const addHumanHandSacrificeButton =
+  document.querySelector<HTMLButtonElement>('#add-human-hand-sacrifice')!
+const removeAllHumanHandSacrificesButton = document.querySelector<HTMLButtonElement>(
+  '#remove-all-human-hand-sacrifices'
+)!
 const addDragonTalonsButton = document.querySelector<HTMLButtonElement>('#add-dragon-talons')!
 const removeTopAutoScratcherButton = document.querySelector<HTMLButtonElement>(
   '#remove-top-auto-scratcher'
@@ -179,6 +186,9 @@ const setDebugControlsDisabled = (disabled: boolean) => {
   addBillionPointsButton.disabled = disabled
   subtractAllPointsButton.disabled = disabled
   addHumanHandsButton.disabled = disabled
+  removeAllHumanHandsButton.disabled = disabled
+  addHumanHandSacrificeButton.disabled = disabled
+  removeAllHumanHandSacrificesButton.disabled = disabled
   addDragonTalonsButton.disabled = disabled
   removeTopAutoScratcherButton.disabled = disabled
 }
@@ -257,6 +267,54 @@ const addDragonTalons = async () => {
   }
 }
 
+const removeAllHumanHands = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    const storedAutoScratchers = await storage.get<Record<string, unknown>>('auto-scratchers')
+    await storage.set('auto-scratchers', {
+      ...storedAutoScratchers,
+      'human-hands': 0,
+    })
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
+const addHumanHandSacrifice = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    const storedCount = await storage.get<number>('human-hand-sacrifices')
+    const currentCount =
+      typeof storedCount === 'number' && Number.isSafeInteger(storedCount) && storedCount >= 0
+        ? storedCount
+        : 0
+    await storage.set(
+      'human-hand-sacrifices',
+      Math.min(Number.MAX_SAFE_INTEGER, currentCount + 1)
+    )
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
+const removeAllHumanHandSacrifices = async () => {
+  setDebugControlsDisabled(true)
+  close()
+
+  try {
+    await storage.set('human-hand-sacrifices', 0)
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
+}
+
 const removeTopAutoScratcher = async () => {
   setDebugControlsDisabled(true)
   close()
@@ -313,6 +371,15 @@ subtractAllPointsButton.addEventListener('click', () => {
 })
 addHumanHandsButton.addEventListener('click', () => {
   void addHumanHands()
+})
+removeAllHumanHandsButton.addEventListener('click', () => {
+  void removeAllHumanHands()
+})
+addHumanHandSacrificeButton.addEventListener('click', () => {
+  void addHumanHandSacrifice()
+})
+removeAllHumanHandSacrificesButton.addEventListener('click', () => {
+  void removeAllHumanHandSacrifices()
 })
 addDragonTalonsButton.addEventListener('click', () => {
   void addDragonTalons()

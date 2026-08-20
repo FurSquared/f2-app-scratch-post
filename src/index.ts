@@ -12,6 +12,7 @@ const centralBaseRevealRatio = 0.875
 const twinesScratchedStorageKey = 'twines-scratched'
 const scratchCounterStorageKey = 'scratch-counter'
 const autoScratchersStorageKey = 'auto-scratchers'
+const humanHandSacrificesStorageKey = 'human-hand-sacrifices'
 const storageSyncMilliseconds = 1000
 const twineCounterRevealCount = 100
 const humanHandsId = 'human-hands'
@@ -19,13 +20,19 @@ const humanHandsCost = 1_000_000_000
 const humanHandsBaseCycleMilliseconds = 8_000
 const humanHandsBaseSweepMilliseconds = 1_800
 const humanHandsBaseTurnMilliseconds = 550
+const humanHandsPerAdditionalActor = 100
+const maximumHumanHandActors = 10
+const maximumHumanHandSpeedMultiplier = 10
+const humanHandSacrificeId = 'human-hand-sacrifice'
+const humanHandSacrificeCost = 1_000
+const maximumDisplayedSacrificeCircles = 10
 const purchaseEmphasisMilliseconds = 700
 const nextDingAtByAudioContext = new WeakMap<AudioContext, number>()
 
 type AutoScratcherId =
   'clawless-bapper' | 'kitty-claws' | 'bear-claws' | 'tiger-claws' | 'raptor-talon' | 'dragon-talon'
 
-type PurchaseId = AutoScratcherId | typeof humanHandsId
+type PurchaseId = AutoScratcherId | typeof humanHandsId | typeof humanHandSacrificeId
 
 type AutoScratcherDefinition = {
   id: AutoScratcherId
@@ -54,6 +61,22 @@ type AutoScratcherActor = {
   visualSourceY?: number
   visualAngle?: number
   lastVisualPoseAt?: number
+}
+
+type HumanHandActor = {
+  animationMilliseconds: number
+  animationSpeed: number
+  scheduleSpeed: number
+  lastAnimationAt: number
+  sweepCycle: number
+  previousX?: number
+  previousY?: number
+  sweepPlan?: {
+    cycle: number
+    leftYRatio: number
+    rightYRatio: number
+    curveRatio: number
+  }
 }
 
 type AutoScratcherMotionProfile = {
@@ -166,6 +189,26 @@ const humanHandsDefinition = {
   color: '#b98552',
   cost: humanHandsCost,
 } as const
+
+const humanHandSacrificeDefinition = {
+  id: humanHandSacrificeId,
+  label: 'Sacrifice everything',
+  color: '#d31313',
+  cost: humanHandSacrificeCost,
+} as const
+
+const humanHandActorColors = [
+  humanHandsDefinition.color,
+  '#f1c27d',
+  '#6f452b',
+  '#2f1b12',
+  '#ffd400',
+  '#0067a5',
+  '#39ff14',
+  '#ff5f1f',
+  '#ff073a',
+  '#fff',
+] as const
 
 export type MicroAppViewport = {
   width: number
@@ -396,7 +439,7 @@ type Twine = {
   lifetime: number
   settled: boolean
   swept?: boolean
-  lastHumanHandSweepCycle?: number
+  lastHumanHandSweepCycles?: number[]
   landingSourceY?: number
 }
 
@@ -1051,23 +1094,20 @@ function createScratchPostApp(): MicroApp {
       let twinesScratchedLoaded = false
       let twinesScratchedDirty = false
       let autoScratchersDirty = false
+      let humanHandSacrificesDirty = false
       let scratchCounterActive = false
       let humanHandsLevel = 0
       let humanHandsPurchasedThisMount = 0
-      let humanHandSweepCycle = -1
-      let previousHumanHandX: number | undefined
-      let previousHumanHandY: number | undefined
-      let humanHandAnimationMilliseconds = 0
-      let humanHandAnimationSpeed = 1
-      let lastHumanHandAnimationAt = 0
-      let humanHandSweepPlan:
-        | {
-            cycle: number
-            leftYRatio: number
-            rightYRatio: number
-            curveRatio: number
-          }
+      let humanHandSacrifices = 0
+      let humanHandSacrificesThisMount = 0
+      const arcaneCircleSpriteCache = new Map<
+        string,
+        { canvas: HTMLCanvasElement; size: number }
+      >()
+      let sacrificeBackgroundGradientCache:
+        | { width: number; height: number; gradient: CanvasGradient }
         | undefined
+      const humanHandActors: HumanHandActor[] = []
       const autoScratchers = Object.fromEntries(
         autoScratcherDefinitions.map((definition) => [
           definition.id,
@@ -1214,23 +1254,25 @@ function createScratchPostApp(): MicroApp {
             ])
           ) as Record<AutoScratcherId, number>),
           [humanHandsId]: humanHandsLevel,
-        }) satisfies Record<PurchaseId, number>
+        }) satisfies Record<AutoScratcherId | typeof humanHandsId, number>
 
       const persistAppState = async () => {
         if (
           !host.storage ||
           !twinesScratchedLoaded ||
-          (!twinesScratchedDirty && !autoScratchersDirty)
+          (!twinesScratchedDirty && !autoScratchersDirty && !humanHandSacrificesDirty)
         ) {
           return
         }
 
         const count = twinesScratched
         const autoScratcherCounts = storedAutoScratcherCounts()
+        const sacrificeCount = humanHandSacrifices
         try {
           await host.storage.setMany([
             [twinesScratchedStorageKey, count],
             [autoScratchersStorageKey, autoScratcherCounts],
+            [humanHandSacrificesStorageKey, sacrificeCount],
           ])
           if (twinesScratched === count) {
             twinesScratchedDirty = false
@@ -1243,6 +1285,9 @@ function createScratchPostApp(): MicroApp {
             humanHandsLevel === autoScratcherCounts[humanHandsId]
           ) {
             autoScratchersDirty = false
+          }
+          if (humanHandSacrifices === sacrificeCount) {
+            humanHandSacrificesDirty = false
           }
         } catch {
           // Persistence is best-effort so storage failures never interrupt the app.
@@ -1260,6 +1305,7 @@ function createScratchPostApp(): MicroApp {
             twinesScratchedStorageKey,
             scratchCounterStorageKey,
             autoScratchersStorageKey,
+            humanHandSacrificesStorageKey,
           ])
           const storedCount = storedState.get(twinesScratchedStorageKey)
           const validStoredCount =
@@ -1310,15 +1356,25 @@ function createScratchPostApp(): MicroApp {
               ? storedHumanHandsCount
               : 0
           humanHandsLevel = validHumanHandsCount + humanHandsPurchasedThisMount
+          const storedSacrificeCount = storedState.get(humanHandSacrificesStorageKey)
+          const validSacrificeCount =
+            typeof storedSacrificeCount === 'number' &&
+            Number.isSafeInteger(storedSacrificeCount) &&
+            storedSacrificeCount >= 0
+              ? storedSacrificeCount
+              : 0
+          humanHandSacrifices = validSacrificeCount + humanHandSacrificesThisMount
           twinesScratchedDirty = twinesScratchedThisMount > 0
           autoScratchersDirty =
             humanHandsPurchasedThisMount > 0 ||
             autoScratcherDefinitions.some(
               (definition) => autoScratchers[definition.id].purchasedThisMount > 0
             )
+          humanHandSacrificesDirty = humanHandSacrificesThisMount > 0
         } catch {
           twinesScratched = twinesScratchedThisMount
           humanHandsLevel = humanHandsPurchasedThisMount
+          humanHandSacrifices = humanHandSacrificesThisMount
           playCrossedTwineDings(0, twinesScratched)
           if (twinesScratched >= twineCounterRevealCount) {
             activateScratchCounter()
@@ -1441,6 +1497,8 @@ function createScratchPostApp(): MicroApp {
         pixelRatio = viewport.devicePixelRatio
         displayWidth = viewport.width
         displayHeight = viewport.height
+        arcaneCircleSpriteCache.clear()
+        sacrificeBackgroundGradientCache = undefined
         const scaleX = displayWidth / previousWidth
         const scaleY = displayHeight / previousHeight
         if (previousWidth > 1 && previousHeight > 1) {
@@ -1469,25 +1527,67 @@ function createScratchPostApp(): MicroApp {
         }
       }
 
-      const humanHandSweepPose = (timestamp: number, layout: ImageLayout) => {
-        if (humanHandsLevel <= 0) {
-          return undefined
-        }
+      const humanHandActorCount = () =>
+        humanHandsLevel > 0
+          ? Math.min(
+              maximumHumanHandActors,
+              1 + Math.floor(humanHandsLevel / humanHandsPerAdditionalActor)
+            )
+          : 0
 
+      const createHumanHandActor = (): HumanHandActor => ({
+        animationMilliseconds: Math.random() * humanHandsBaseCycleMilliseconds,
+        animationSpeed: 1,
+        scheduleSpeed: 0.94 + Math.random() * 0.12,
+        lastAnimationAt: 0,
+        sweepCycle: -1,
+      })
+
+      const syncHumanHandActors = () => {
+        const actorCount = humanHandActorCount()
+        while (humanHandActors.length < actorCount) {
+          humanHandActors.push(createHumanHandActor())
+        }
+        humanHandActors.length = Math.min(humanHandActors.length, actorCount)
+      }
+
+      const humanHandRestingPosition = (
+        actorIndex: number,
+        side: 'left' | 'right',
+        layout: ImageLayout,
+        handSize: number
+      ) => {
+        const slotRatio = actorIndex / Math.max(1, maximumHumanHandActors - 1)
+        const yRatio = 0.32 + slotRatio * 0.62
+        const sideDirection = side === 'left' ? -1 : 1
+        const sideEdge = side === 'left' ? layout.x : layout.x + layout.width
+        const depth = 0.28 + (actorIndex % 3) * 0.08
+        return {
+          x: sideEdge + sideDirection * handSize * depth,
+          y: layout.y + layout.height * yRatio,
+        }
+      }
+
+      const humanHandSweepPose = (
+        actor: HumanHandActor,
+        actorIndex: number,
+        layout: ImageLayout
+      ) => {
         const cycleMilliseconds = humanHandsBaseCycleMilliseconds
         const sweepMilliseconds = humanHandsBaseSweepMilliseconds
         const turnMilliseconds = humanHandsBaseTurnMilliseconds
         const idleMilliseconds = cycleMilliseconds - sweepMilliseconds - turnMilliseconds * 2
-        const cycle = Math.floor(humanHandAnimationMilliseconds / cycleMilliseconds)
-        const cycleElapsed = humanHandAnimationMilliseconds - cycle * cycleMilliseconds
+        const cycle = Math.floor(actor.animationMilliseconds / cycleMilliseconds)
+        const cycleElapsed = actor.animationMilliseconds - cycle * cycleMilliseconds
         const direction = cycle % 2 === 0 ? 1 : -1
         const handSize = Math.max(50, Math.min(83, layout.width * 0.192))
-        const leftX = layout.x - handSize * 0.38
-        const rightX = layout.x + layout.width + handSize * 0.38
-        const startX = direction > 0 ? leftX : rightX
-        const endX = direction > 0 ? rightX : leftX
-        const idleY = layout.y + layout.height * 0.69
-        if (!humanHandSweepPlan || humanHandSweepPlan.cycle !== cycle) {
+        const leftPathX = layout.x - handSize * 0.38
+        const rightPathX = layout.x + layout.width + handSize * 0.38
+        const leftRest = humanHandRestingPosition(actorIndex, 'left', layout, handSize)
+        const rightRest = humanHandRestingPosition(actorIndex, 'right', layout, handSize)
+        const startRest = direction > 0 ? leftRest : rightRest
+        const endRest = direction > 0 ? rightRest : leftRest
+        if (!actor.sweepPlan || actor.sweepPlan.cycle !== cycle) {
           const curveStyle = Math.floor(Math.random() * 3)
           const curveRatio =
             curveStyle === 0
@@ -1495,17 +1595,17 @@ function createScratchPostApp(): MicroApp {
               : curveStyle === 1
                 ? 0.025 + Math.random() * 0.055
                 : (Math.random() * 2 - 1) * 0.014
-          humanHandSweepPlan = {
+          actor.sweepPlan = {
             cycle,
             leftYRatio: 0.82 + Math.random() * 0.1,
             rightYRatio: 0.82 + Math.random() * 0.1,
             curveRatio,
           }
         }
-        const leftPathY = layout.y + layout.height * humanHandSweepPlan.leftYRatio
-        const rightPathY = layout.y + layout.height * humanHandSweepPlan.rightYRatio
-        const curveOffset = layout.height * humanHandSweepPlan.curveRatio
-        const bob = Math.sin(humanHandAnimationMilliseconds * 0.0024) * handSize * 0.055
+        const leftPathY = layout.y + layout.height * actor.sweepPlan.leftYRatio
+        const rightPathY = layout.y + layout.height * actor.sweepPlan.rightYRatio
+        const curveOffset = layout.height * actor.sweepPlan.curveRatio
+        const bob = Math.sin(actor.animationMilliseconds * 0.0024) * handSize * 0.055
         const smooth = (progress: number) =>
           progress * progress * progress * (progress * (progress * 6 - 15) + 10)
         const interpolateAngle = (start: number, end: number, progress: number) => {
@@ -1517,7 +1617,7 @@ function createScratchPostApp(): MicroApp {
           (rightPathY - leftPathY) * progress +
           4 * progress * (1 - progress) * curveOffset
         const pathRotation = (progress: number) => {
-          const pathWidth = rightX - leftX
+          const pathWidth = rightPathX - leftPathX
           const tangentX = direction * pathWidth
           const tangentY =
             direction * (rightPathY - leftPathY + 4 * (1 - 2 * progress) * curveOffset)
@@ -1529,32 +1629,35 @@ function createScratchPostApp(): MicroApp {
         const turnOutStartsAt = sweepStartsAt + sweepMilliseconds
         const initialPathProgress = direction > 0 ? 0 : 1
         const finalPathProgress = direction > 0 ? 1 : 0
+        const initialPathX = initialPathProgress ? rightPathX : leftPathX
+        const finalPathX = finalPathProgress ? rightPathX : leftPathX
         const initialPathY = pathY(initialPathProgress)
         const finalPathY = pathY(finalPathProgress)
         let phase: 'idle' | 'turn-in' | 'sweep' | 'turn-out' = 'idle'
-        let x = startX
-        let y = idleY + bob
+        let x = startRest.x
+        let y = startRest.y + bob
         let rotation = 0
         let pathProgress = initialPathProgress
 
         if (cycleElapsed >= turnOutStartsAt) {
           phase = 'turn-out'
           const progress = smooth(Math.min(1, (cycleElapsed - turnOutStartsAt) / turnMilliseconds))
-          x = endX
-          y = finalPathY + (idleY + bob - finalPathY) * progress
+          x = finalPathX + (endRest.x - finalPathX) * progress
+          y = finalPathY + (endRest.y + bob - finalPathY) * progress
           rotation = interpolateAngle(pathRotation(finalPathProgress), 0, progress)
           pathProgress = finalPathProgress
         } else if (cycleElapsed >= sweepStartsAt) {
           phase = 'sweep'
           const progress = smooth(Math.min(1, (cycleElapsed - sweepStartsAt) / sweepMilliseconds))
           pathProgress = direction > 0 ? progress : 1 - progress
-          x = leftX + (rightX - leftX) * pathProgress
+          x = leftPathX + (rightPathX - leftPathX) * pathProgress
           y = pathY(pathProgress)
           rotation = pathRotation(pathProgress)
         } else if (cycleElapsed >= turnInStartsAt) {
           phase = 'turn-in'
           const progress = smooth(Math.min(1, (cycleElapsed - turnInStartsAt) / turnMilliseconds))
-          y = idleY + bob + (initialPathY - idleY - bob) * progress
+          x = startRest.x + (initialPathX - startRest.x) * progress
+          y = startRest.y + bob + (initialPathY - startRest.y - bob) * progress
           rotation = interpolateAngle(0, pathRotation(initialPathProgress), progress)
         }
 
@@ -1577,44 +1680,46 @@ function createScratchPostApp(): MicroApp {
         }
       }
 
-      const advanceHumanHandSweep = (timestamp: number, layout: ImageLayout) => {
-        if (humanHandsLevel <= 0) {
-          lastHumanHandAnimationAt = timestamp
-          return
-        }
-
-        const elapsedMilliseconds = lastHumanHandAnimationAt
-          ? Math.max(0, Math.min(50, timestamp - lastHumanHandAnimationAt))
+      const advanceHumanHandActor = (
+        actor: HumanHandActor,
+        actorIndex: number,
+        timestamp: number,
+        layout: ImageLayout
+      ) => {
+        const elapsedMilliseconds = actor.lastAnimationAt
+          ? Math.max(0, Math.min(50, timestamp - actor.lastAnimationAt))
           : 0
-        const targetSpeed = Math.pow(1.1, Math.min(60, Math.max(0, humanHandsLevel - 1)))
+        const targetSpeed = Math.min(
+          maximumHumanHandSpeedMultiplier,
+          Math.pow(1.1, Math.max(0, humanHandsLevel - 1))
+        )
         const speedBlend = 1 - Math.exp(-(elapsedMilliseconds / 1000) * 3.5)
-        humanHandAnimationSpeed += (targetSpeed - humanHandAnimationSpeed) * speedBlend
-        humanHandAnimationMilliseconds += elapsedMilliseconds * humanHandAnimationSpeed
-        lastHumanHandAnimationAt = timestamp
+        const scheduledTargetSpeed = Math.min(
+          maximumHumanHandSpeedMultiplier,
+          targetSpeed * actor.scheduleSpeed
+        )
+        actor.animationSpeed += (scheduledTargetSpeed - actor.animationSpeed) * speedBlend
+        actor.animationMilliseconds += elapsedMilliseconds * actor.animationSpeed
+        actor.lastAnimationAt = timestamp
 
-        const pose = humanHandSweepPose(timestamp, layout)
-        if (!pose) {
-          previousHumanHandX = undefined
-          previousHumanHandY = undefined
-          return
-        }
+        const pose = humanHandSweepPose(actor, actorIndex, layout)
 
-        if (pose.cycle !== humanHandSweepCycle) {
-          humanHandSweepCycle = pose.cycle
-          previousHumanHandX = pose.x
-          previousHumanHandY = pose.y
+        if (pose.cycle !== actor.sweepCycle) {
+          actor.sweepCycle = pose.cycle
+          actor.previousX = pose.x
+          actor.previousY = pose.y
         }
 
         if (pose.contact) {
-          const previousX = previousHumanHandX ?? pose.x
-          const previousY = previousHumanHandY ?? pose.y
+          const previousX = actor.previousX ?? pose.x
+          const previousY = actor.previousY ?? pose.y
           const contactRadius = pose.handSize * 0.3
           const segmentX = pose.x - previousX
           const segmentY = pose.y - previousY
           const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY
 
           twines.forEach((twine) => {
-            if (twine.lastHumanHandSweepCycle === pose.cycle) {
+            if (twine.lastHumanHandSweepCycles?.[actorIndex] === pose.cycle) {
               return
             }
 
@@ -1636,7 +1741,8 @@ function createScratchPostApp(): MicroApp {
               return
             }
 
-            twine.lastHumanHandSweepCycle = pose.cycle
+            twine.lastHumanHandSweepCycles ??= []
+            twine.lastHumanHandSweepCycles[actorIndex] = pose.cycle
             if (twine.settled) {
               twine.settled = false
               twine.swept = true
@@ -1652,12 +1758,23 @@ function createScratchPostApp(): MicroApp {
           })
         }
 
-        previousHumanHandX = pose.x
-        previousHumanHandY = pose.y
+        actor.previousX = pose.x
+        actor.previousY = pose.y
       }
 
-      const drawHumanHandSweep = (timestamp: number, layout: ImageLayout) => {
-        const pose = humanHandSweepPose(timestamp, layout)
+      const advanceHumanHandSweeps = (timestamp: number, layout: ImageLayout) => {
+        syncHumanHandActors()
+        humanHandActors.forEach((actor, actorIndex) => {
+          advanceHumanHandActor(actor, actorIndex, timestamp, layout)
+        })
+      }
+
+      const drawHumanHandActor = (
+        actor: HumanHandActor,
+        actorIndex: number,
+        layout: ImageLayout
+      ) => {
+        const pose = humanHandSweepPose(actor, actorIndex, layout)
         if (!pose) {
           return
         }
@@ -1669,7 +1786,7 @@ function createScratchPostApp(): MicroApp {
         context.shadowOffsetX = 3
         context.shadowOffsetY = 4
         drawHand(context, {
-          color: humanHandsDefinition.color,
+          color: humanHandActorColors[actorIndex] ?? humanHandsDefinition.color,
           x: pose.x,
           y: pose.y,
           variant: pose.contact ? 'grab' : 'open',
@@ -1678,6 +1795,12 @@ function createScratchPostApp(): MicroApp {
           strokeWidth: 1.5 / scale,
         })
         context.restore()
+      }
+
+      const drawHumanHandSweeps = (layout: ImageLayout) => {
+        humanHandActors.forEach((actor, actorIndex) =>
+          drawHumanHandActor(actor, actorIndex, layout)
+        )
       }
 
       const updateTwines = (timestamp: number, layout: ImageLayout) => {
@@ -1775,6 +1898,171 @@ function createScratchPostApp(): MicroApp {
         })
 
         context.restore()
+      }
+
+      const drawArcaneCircleArtwork = (
+        artworkContext: CanvasRenderingContext2D,
+        radius: number
+      ) => {
+        artworkContext.strokeStyle = humanHandSacrificeDefinition.color
+        artworkContext.fillStyle = humanHandSacrificeDefinition.color
+        artworkContext.lineWidth = Math.max(1, radius * 0.025)
+        artworkContext.shadowColor = '#ff1d1d'
+        artworkContext.shadowBlur = radius * 0.14
+
+        for (const scale of [1, 0.82, 0.48]) {
+          artworkContext.beginPath()
+          artworkContext.arc(0, 0, radius * scale, 0, Math.PI * 2)
+          artworkContext.stroke()
+        }
+
+        artworkContext.beginPath()
+        for (let point = 0; point < 5; point += 1) {
+          const angle = -Math.PI / 2 + (point * Math.PI * 4) / 5
+          const x = Math.cos(angle) * radius * 0.77
+          const y = Math.sin(angle) * radius * 0.77
+          if (point === 0) {
+            artworkContext.moveTo(x, y)
+          } else {
+            artworkContext.lineTo(x, y)
+          }
+        }
+        artworkContext.closePath()
+        artworkContext.stroke()
+
+        for (let mark = 0; mark < 12; mark += 1) {
+          const angle = (mark * Math.PI * 2) / 12
+          const innerRadius = radius * (mark % 3 === 0 ? 0.84 : 0.88)
+          const outerRadius = radius * 0.97
+          artworkContext.beginPath()
+          artworkContext.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius)
+          artworkContext.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius)
+          artworkContext.stroke()
+        }
+
+        for (let dot = 0; dot < 5; dot += 1) {
+          const angle = -Math.PI / 2 + Math.PI / 5 + (dot * Math.PI * 2) / 5
+          artworkContext.beginPath()
+          artworkContext.arc(
+            Math.cos(angle) * radius * 0.65,
+            Math.sin(angle) * radius * 0.65,
+            Math.max(1.5, radius * 0.035),
+            0,
+            Math.PI * 2
+          )
+          artworkContext.fill()
+        }
+      }
+
+      const arcaneCircleSprite = (radius: number) => {
+        const cacheKey = `${Math.round(radius * 100)}:${pixelRatio}`
+        const cached = arcaneCircleSpriteCache.get(cacheKey)
+        if (cached) {
+          return cached
+        }
+
+        const size = radius * 2.5
+        const spriteCanvas = surface.ownerDocument.createElement('canvas')
+        spriteCanvas.width = Math.ceil(size * pixelRatio)
+        spriteCanvas.height = Math.ceil(size * pixelRatio)
+        const spriteContext = spriteCanvas.getContext('2d')
+        if (!spriteContext) {
+          return undefined
+        }
+        spriteContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+        spriteContext.translate(size / 2, size / 2)
+        drawArcaneCircleArtwork(spriteContext, radius)
+        const sprite = { canvas: spriteCanvas, size }
+        arcaneCircleSpriteCache.set(cacheKey, sprite)
+        return sprite
+      }
+
+      const drawArcaneCircle = (
+        timestamp: number,
+        centerX: number,
+        centerY: number,
+        radius: number,
+        alpha = 1,
+        rotation = timestamp * 0.00008
+      ) => {
+        const sprite = arcaneCircleSprite(radius)
+        if (!sprite) {
+          return
+        }
+
+        context.save()
+        context.translate(centerX, centerY)
+        context.rotate(rotation)
+        context.globalAlpha = alpha
+        context.drawImage(
+          sprite.canvas,
+          -sprite.size / 2,
+          -sprite.size / 2,
+          sprite.size,
+          sprite.size
+        )
+        context.restore()
+      }
+
+      const drawSacrificeBackground = (timestamp: number) => {
+        if (humanHandSacrifices <= 0) {
+          return
+        }
+
+        if (
+          !sacrificeBackgroundGradientCache ||
+          sacrificeBackgroundGradientCache.width !== displayWidth ||
+          sacrificeBackgroundGradientCache.height !== displayHeight
+        ) {
+          const gradient = context.createRadialGradient(
+            displayWidth * 0.72,
+            displayHeight * 0.18,
+            0,
+            displayWidth * 0.5,
+            displayHeight * 0.45,
+            Math.max(displayWidth, displayHeight) * 0.82
+          )
+          gradient.addColorStop(0, '#292929')
+          gradient.addColorStop(0.48, '#141414')
+          gradient.addColorStop(1, '#000')
+          sacrificeBackgroundGradientCache = {
+            width: displayWidth,
+            height: displayHeight,
+            gradient,
+          }
+        }
+        context.fillStyle = sacrificeBackgroundGradientCache.gradient
+        context.fillRect(0, 0, displayWidth, displayHeight)
+        const radius = Math.max(34, Math.min(68, displayWidth * 0.15, displayHeight * 0.11))
+        const circleCount = Math.min(
+          maximumDisplayedSacrificeCircles,
+          humanHandSacrifices
+        )
+        const availableRowDistance = Math.max(0, displayHeight - radius * 1.7)
+
+        for (let circleIndex = 0; circleIndex < circleCount; circleIndex += 1) {
+          const row = Math.floor(circleIndex / 2)
+          const onRight = circleIndex % 2 === 0
+          const phase = circleIndex * 1.73
+          const hoverSpeed = 0.00055 + circleIndex * 0.00009
+          const hoverDistance = 4 + (circleIndex % 3) * 1.5
+          const floatX = Math.cos(timestamp * hoverSpeed * 0.73 + phase) * hoverDistance * 0.35
+          const floatY = Math.sin(timestamp * hoverSpeed + phase) * hoverDistance
+          const baseX = onRight ? displayWidth - radius * 0.72 : radius * 0.72
+          const baseY = radius * 0.85 + (availableRowDistance * row) / 4
+          const rotationDirection = circleIndex % 2 === 0 ? 1 : -1
+          const rotationSpeed = 0.000045 + circleIndex * 0.000014
+          const rotation = timestamp * rotationSpeed * rotationDirection + phase
+
+          drawArcaneCircle(
+            timestamp,
+            baseX + floatX,
+            baseY + floatY,
+            radius,
+            0.78,
+            rotation
+          )
+        }
       }
 
       const drawTwineCounter = () => {
@@ -1944,6 +2232,51 @@ function createScratchPostApp(): MicroApp {
             id: humanHandsDefinition.id,
             x: handX,
             y: handY,
+            width,
+            height,
+          })
+          y += Math.max(30, fontSize + 12)
+        }
+
+        if (humanHandsLevel > humanHandSacrificeDefinition.cost) {
+          const label = humanHandSacrificeDefinition.label
+          const iconX = 9
+          const iconY = y - 2
+          const iconRadius = Math.max(9, fontSize * 0.62)
+          const textX = 38
+          context.save()
+          context.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+          const width = textX + context.measureText(label).width - iconX
+          const height = Math.max(iconRadius * 2, fontSize + 6)
+          applyPurchaseEmphasis(
+            humanHandSacrificeDefinition.id,
+            timestamp,
+            iconX,
+            iconY,
+            width,
+            height
+          )
+
+          drawArcaneCircle(
+            timestamp,
+            iconX + iconRadius,
+            iconY + iconRadius,
+            iconRadius,
+            0.95
+          )
+          context.textBaseline = 'top'
+          context.lineJoin = 'round'
+          context.lineWidth = Math.max(3, fontSize * 0.18)
+          context.strokeStyle = 'rgba(42, 31, 22, 0.9)'
+          context.strokeText(label, textX, y)
+          context.fillStyle = '#fff'
+          context.fillText(label, textX, y)
+          context.restore()
+
+          purchaseHitRegions.push({
+            id: humanHandSacrificeDefinition.id,
+            x: iconX,
+            y: iconY,
             width,
             height,
           })
@@ -2309,6 +2642,7 @@ function createScratchPostApp(): MicroApp {
 
       const hasAutoScratchers = () =>
         humanHandsLevel > 0 ||
+        humanHandSacrifices > 0 ||
         autoScratcherDefinitions.some(
           (definition) => autoScratchers[definition.id].actors.length > 0
         )
@@ -2322,6 +2656,7 @@ function createScratchPostApp(): MicroApp {
         if (!imageReady) {
           return
         }
+        drawSacrificeBackground(timestamp)
 
         const idleMilliseconds = timestamp - lastInputAt
         const inputActive = idleMilliseconds <= inputHoldMilliseconds
@@ -2341,12 +2676,12 @@ function createScratchPostApp(): MicroApp {
           layout.height
         )
         advanceAutoScratcherCountdowns(timestamp)
-        advanceHumanHandSweep(timestamp, layout)
+        advanceHumanHandSweeps(timestamp, layout)
         updateTwines(timestamp, layout)
         drawTwines(timestamp, offsetX, offsetY)
         drawAutoScratcherPaws(timestamp, layout)
         emitDueAutoScratches(timestamp, layout, true)
-        drawHumanHandSweep(timestamp, layout)
+        drawHumanHandSweeps(layout)
         drawTwineCounter()
         drawAutoScratcherOptions(timestamp)
         lastFrameAt = timestamp
@@ -2400,6 +2735,34 @@ function createScratchPostApp(): MicroApp {
         )
 
       const buyUpgrade = (id: PurchaseId) => {
+        if (id === humanHandSacrificeId) {
+          if (humanHandsLevel <= humanHandSacrificeDefinition.cost) {
+            return
+          }
+
+          humanHandsLevel = 1
+          twinesScratched = 0
+          twinesScratchedDirty = true
+          humanHandSacrifices += 1
+          humanHandSacrificesThisMount += 1
+          autoScratcherDefinitions.forEach((definition) => {
+            const state = autoScratchers[definition.id]
+            state.actors.length = 0
+            state.purchasedThisMount = 0
+            particleGenerationCredits[definition.id] = 0
+          })
+          const clawlessBapperDefinition = autoScratcherDefinitions[0]
+          const clawlessBapper = createAutoScratcherActor(clawlessBapperDefinition.id)
+          autoScratchers[clawlessBapperDefinition.id].actors.push(clawlessBapper)
+          staggerAutoScratcherActors(clawlessBapperDefinition, clawlessBapper)
+          autoScratchersDirty = true
+          humanHandSacrificesDirty = true
+          purchaseEmphasis.set(id, { startedAt: performance.now(), multiple: 1 })
+          scratchAudio.playDing()
+          requestDraw()
+          return
+        }
+
         if (id === humanHandsId) {
           if (twinesScratched < humanHandsDefinition.cost) {
             return
@@ -2553,7 +2916,10 @@ function createScratchPostApp(): MicroApp {
           suspendedAt = undefined
         }
         lastFrameAt = timestamp
-        lastHumanHandAnimationAt = timestamp
+        syncHumanHandActors()
+        humanHandActors.forEach((actor) => {
+          actor.lastAnimationAt = timestamp
+        })
         autoScratcherDefinitions.forEach((definition) => {
           autoScratchers[definition.id].actors.forEach((actor) => {
             actor.lastVisualPoseAt = timestamp
