@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.5.0...v0.6.0) (2026-08-20)
+
+
+### Features
+
+* End game ([84682df](https://github.com/FurSquared/f2-app-scratch-post/commit/84682df2385c27f96e4aacd713228e0b63b3abc4))
+
 ## [0.5.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.4.7...v0.5.0) (2026-07-28)
 
 
