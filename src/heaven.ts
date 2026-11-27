@@ -41,6 +41,8 @@ const centerY = 0.402
 const cylinderRadius = 0.061
 const padHalf = 0.185
 const ground = 0.032
+const isSisalHeight = (height: number) =>
+  height >= 0.089 && height <= 0.733 && (height <= 0.406 || height >= 0.421)
 const tau = Math.PI * 2
 const maxFibers = 360
 const iconColumns = 8
@@ -463,19 +465,17 @@ export function createHeaven(
     const angle = clock * (0.66 + tier * 0.055) + tier * 2.4 + yaw - 0.56
     const rake = Math.sin(clock * (5.2 + tier * 2.4) + tier) * 0.5 + 0.5
     const y = 0.47 + Math.sin(clock * 0.93 + tier * 1.2) * 0.13 - 0.115 * rake
-    return { angle, y: Math.abs(y - 0.413) < 0.015 ? y + 0.016 : y, radius: 0.1 + 0.027 * rake }
+    return { angle, y, radius: 0.1 + 0.027 * rake }
   }
 
   function autoFiber(tier: number, count: number) {
     const pose = pawPose(tier, time)
     for (let i = 0; i < Math.min(5, count); i += 1) {
-      const angle = pose.angle + (Math.random() - 0.5) * 0.4
-      fiber(
-        Math.sin(angle) * 0.063,
-        pose.y + (Math.random() - 0.5) * 0.025,
-        Math.cos(angle) * 0.063,
-        0.3
-      )
+      const height = pose.y + (Math.random() - 0.5) * 0.025
+      if (isSisalHeight(height)) {
+        const angle = pose.angle + (Math.random() - 0.5) * 0.4
+        fiber(Math.sin(angle) * 0.063, height * (1 - bounce), Math.cos(angle) * 0.063, 0.3)
+      }
     }
   }
 
@@ -494,7 +494,7 @@ export function createHeaven(
     }
     const t = middle + Math.sqrt(chord)
     const height = (centerY + sy * up[1] + t * eye[1]) / (1 - bounce)
-    if (height < 0.089 || height > 0.733 || (height > 0.406 && height < 0.421)) {
+    if (!isSisalHeight(height)) {
       return undefined
     }
     return { x: ox + t * eye[0], y: height, z: oz + t * eye[2] }
@@ -733,7 +733,7 @@ export function createHeaven(
       const pose = pawPose(tier, time)
       const x = Math.sin(pose.angle) * pose.radius
       const z = Math.cos(pose.angle) * pose.radius
-      billboard(x, pose.y, z, 0.048, Math.sin(pose.angle - yaw) * 0.48, tier)
+      billboard(x, pose.y * (1 - bounce), z, 0.048, Math.sin(pose.angle - yaw) * 0.48, tier)
     })
     renderFibers(dt)
     if (!vertexOffset) {
