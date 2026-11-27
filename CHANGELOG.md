@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.7.0...v0.7.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* Rotate post ([#17](https://github.com/FurSquared/f2-app-scratch-post/issues/17)) ([13acbab](https://github.com/FurSquared/f2-app-scratch-post/commit/13acbab83d16c253bb3ec128776f29fe64d00b1a))
+
 ## [0.7.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.6.0...v0.7.0) (2026-11-27)
 
 
