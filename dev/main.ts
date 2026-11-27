@@ -8,6 +8,7 @@ const surface = document.querySelector<HTMLElement>('#app-surface')!
 const canvas = document.querySelector<HTMLCanvasElement>('#app-canvas')!
 const titleBar = document.querySelector<HTMLElement>('#title-bar')!
 const desktopShortcut = document.querySelector<HTMLButtonElement>('#desktop-shortcut')!
+const toggleAscensionButton = document.querySelector<HTMLButtonElement>('#toggle-ascension')!
 const addBillionPointsButton = document.querySelector<HTMLButtonElement>('#add-billion-points')!
 const subtractAllPointsButton =
   document.querySelector<HTMLButtonElement>('#subtract-all-points')!
@@ -183,6 +184,7 @@ const close = () => {
 }
 
 const setDebugControlsDisabled = (disabled: boolean) => {
+  toggleAscensionButton.disabled = disabled
   addBillionPointsButton.disabled = disabled
   subtractAllPointsButton.disabled = disabled
   addHumanHandsButton.disabled = disabled
@@ -191,6 +193,23 @@ const setDebugControlsDisabled = (disabled: boolean) => {
   removeAllHumanHandSacrificesButton.disabled = disabled
   addDragonTalonsButton.disabled = disabled
   removeTopAutoScratcherButton.disabled = disabled
+}
+
+const toggleAscension = async () => {
+  setDebugControlsDisabled(true)
+  close()
+  try {
+    const ascended = await storage.get<boolean>('ascended') === true
+    await storage.setMany([
+      ['ascended', !ascended],
+      ['human-hand-sacrifices', ascended ? 8 : 0],
+      ['auto-scratchers', { 'clawless-bapper': 1 }],
+      ['scratch-counter', true],
+    ])
+  } finally {
+    open()
+    setDebugControlsDisabled(false)
+  }
 }
 
 const addBillionPoints = async () => {
@@ -363,6 +382,9 @@ desktopShortcut.addEventListener('dblclick', open)
 taskButton.addEventListener('click', open)
 minimizeButton.addEventListener('click', minimize)
 closeButton.addEventListener('click', close)
+toggleAscensionButton.addEventListener('click', () => {
+  void toggleAscension()
+})
 addBillionPointsButton.addEventListener('click', () => {
   void addBillionPoints()
 })
