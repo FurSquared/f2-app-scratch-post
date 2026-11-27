@@ -1,6 +1,6 @@
 import {
-  ascensionDuration, ascensionStorageKey, ascensionTokens, burnDuration,
-  createAscensionFire, revealDuration,
+  ascensionDuration, ascensionIntroDuration, ascensionStorageKey, ascensionTokens, burnDuration,
+  createAscensionFire, revealDuration, sacrificeRunePose, sacrificeRuneRadius,
 } from './ascension.js'
 import { createHeaven } from './heaven.js'
 
@@ -1115,7 +1115,7 @@ function createScratchPostApp(): MicroApp {
       let humanHandSacrificesThisMount = 0
       const arcaneCircleSpriteCache = new Map<
         string,
-        { canvas: HTMLCanvasElement; size: number }
+        HTMLCanvasElement
       >()
       let sacrificeBackgroundGradientCache:
         | { width: number; height: number; gradient: CanvasGradient }
@@ -1158,7 +1158,7 @@ function createScratchPostApp(): MicroApp {
       let lastAutomaticProgressAt = performance.now()
       let suspendedAt: number | undefined
 
-      type ScenePhase = 'flat' | 'burn' | 'reveal' | 'landing' | 'ascended'
+      type ScenePhase = 'flat' | 'runes' | 'burn' | 'reveal' | 'landing' | 'ascended'
       const setPhase = (phase: ScenePhase) => {
         if (surface.dataset.scratchPostPhase !== phase) {
           surface.dataset.scratchPostPhase = phase
@@ -1288,7 +1288,9 @@ function createScratchPostApp(): MicroApp {
         void persistAppState()
         ritual = {
           startedAt: now,
-          fire: createAscensionFire(image),
+          fire: createAscensionFire(
+            image, lastFrameAt || now, Math.min(maximumDisplayedSacrificeCircles, humanHandSacrifices)
+          ),
           scratchers: storedAutoScratcherCounts(),
           sacrifices: humanHandSacrifices,
           warmed: false,
@@ -2160,9 +2162,8 @@ function createScratchPostApp(): MicroApp {
         spriteContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
         spriteContext.translate(size / 2, size / 2)
         drawArcaneCircleArtwork(spriteContext, radius)
-        const sprite = { canvas: spriteCanvas, size }
-        arcaneCircleSpriteCache.set(cacheKey, sprite)
-        return sprite
+        arcaneCircleSpriteCache.set(cacheKey, spriteCanvas)
+        return spriteCanvas
       }
 
       const drawArcaneCircle = (
@@ -2171,9 +2172,10 @@ function createScratchPostApp(): MicroApp {
         centerY: number,
         radius: number,
         alpha = 1,
-        rotation = timestamp * 0.00008
+        rotation = timestamp * 0.00008,
+        artworkRadius = radius
       ) => {
-        const sprite = arcaneCircleSprite(radius)
+        const sprite = arcaneCircleSprite(artworkRadius)
         if (!sprite) {
           return
         }
@@ -2182,21 +2184,12 @@ function createScratchPostApp(): MicroApp {
         context.translate(centerX, centerY)
         context.rotate(rotation)
         context.globalAlpha = alpha
-        context.drawImage(
-          sprite.canvas,
-          -sprite.size / 2,
-          -sprite.size / 2,
-          sprite.size,
-          sprite.size
-        )
+        const size = radius * 2.5
+        context.drawImage(sprite, -size / 2, -size / 2, size, size)
         context.restore()
       }
 
-      const drawSacrificeBackground = (timestamp: number) => {
-        if (humanHandSacrifices <= 0) {
-          return
-        }
-
+      const drawSacrificeBackdrop = () => {
         if (
           !sacrificeBackgroundGradientCache ||
           sacrificeBackgroundGradientCache.width !== displayWidth ||
@@ -2221,35 +2214,18 @@ function createScratchPostApp(): MicroApp {
         }
         context.fillStyle = sacrificeBackgroundGradientCache.gradient
         context.fillRect(0, 0, displayWidth, displayHeight)
-        const radius = Math.max(34, Math.min(68, displayWidth * 0.15, displayHeight * 0.11))
-        const circleCount = Math.min(
-          maximumDisplayedSacrificeCircles,
-          humanHandSacrifices
-        )
-        const availableRowDistance = Math.max(0, displayHeight - radius * 1.7)
+      }
 
-        for (let circleIndex = 0; circleIndex < circleCount; circleIndex += 1) {
-          const row = Math.floor(circleIndex / 2)
-          const onRight = circleIndex % 2 === 0
-          const phase = circleIndex * 1.73
-          const hoverSpeed = 0.00055 + circleIndex * 0.00009
-          const hoverDistance = 4 + (circleIndex % 3) * 1.5
-          const floatX = Math.cos(timestamp * hoverSpeed * 0.73 + phase) * hoverDistance * 0.35
-          const floatY = Math.sin(timestamp * hoverSpeed + phase) * hoverDistance
-          const baseX = onRight ? displayWidth - radius * 0.72 : radius * 0.72
-          const baseY = radius * 0.85 + (availableRowDistance * row) / 4
-          const rotationDirection = circleIndex % 2 === 0 ? 1 : -1
-          const rotationSpeed = 0.000045 + circleIndex * 0.000014
-          const rotation = timestamp * rotationSpeed * rotationDirection + phase
-
-          drawArcaneCircle(
-            timestamp,
-            baseX + floatX,
-            baseY + floatY,
-            radius,
-            0.78,
-            rotation
-          )
+      const drawSacrificeBackground = (timestamp: number) => {
+        if (humanHandSacrifices <= 0) {
+          return
+        }
+        drawSacrificeBackdrop()
+        const radius = sacrificeRuneRadius(displayWidth, displayHeight)
+        const count = Math.min(maximumDisplayedSacrificeCircles, humanHandSacrifices)
+        for (let index = 0; index < count; index += 1) {
+          const pose = sacrificeRunePose(timestamp, displayWidth, displayHeight, index)
+          drawArcaneCircle(timestamp, pose.x, pose.y, radius, 0.78, pose.rotation)
         }
       }
 
@@ -2859,19 +2835,20 @@ function createScratchPostApp(): MicroApp {
 
         if (ritual && heaven) {
           const elapsed = Math.max(0, timestamp - ritual.startedAt)
-          if (elapsed >= burnDuration && !heaven.ready) {
+          const burnTime = elapsed - ascensionIntroDuration
+          if (burnTime >= burnDuration && !heaven.ready) {
             cancelRitual()
           } else {
-            const revealing = elapsed >= burnDuration
-            const landing = (elapsed - burnDuration - revealDuration) / 1000
-            const phase = !revealing ? 'burn' : landing < 0 ? 'reveal' : 'landing'
+            const revealing = burnTime >= burnDuration
+            const landing = (burnTime - burnDuration - revealDuration) / 1000
+            const phase = burnTime < 0 ? 'runes' : !revealing ? 'burn' : landing < 0 ? 'reveal' : 'landing'
             const phaseChanged = surface.dataset.scratchPostPhase !== phase
             setPhase(phase)
             if (landing < 0 || phaseChanged) {
               context.clearRect(0, 0, displayWidth, displayHeight)
             }
             // Warm the visible backing layer behind the opaque burn before the swipe.
-            if (!ritual.warmed && elapsed >= burnDuration - 2200 && heaven.ready) {
+            if (!ritual.warmed && burnTime >= burnDuration - 2200 && heaven.ready) {
               ritual.warmed = true
               heaven.show(true)
               heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, 1.65, -1, noTiers, 0, 0)
@@ -2882,10 +2859,13 @@ function createScratchPostApp(): MicroApp {
               heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, drop, landing, noTiers, 0, 0)
             }
             if (landing < 0) {
+              if (burnTime < 0) {
+                drawSacrificeBackdrop()
+              }
               ritual.fire.draw(
-                context, elapsed, displayWidth, displayHeight, layout,
-                (x, y, radius, alpha, rotation) =>
-                  drawArcaneCircle(timestamp, x, y, radius, alpha, rotation)
+                context, burnTime, displayWidth, displayHeight, layout,
+                (x, y, radius, alpha, rotation, artworkRadius) =>
+                  drawArcaneCircle(timestamp, x, y, radius, alpha, rotation, artworkRadius)
               )
             }
             if (elapsed < ascensionDuration) {
@@ -3139,7 +3119,7 @@ function createScratchPostApp(): MicroApp {
 
         if (scene && point) {
           const speed = distance / Math.max(.008, (timestamp - previous.timestamp) / 1000)
-          if (scene.scratch(point, event.clientX - previous.x, event.clientY - previous.y, speed, displayWidth)) {
+          if (scene.scratch(point, distance, speed, displayWidth)) {
             recordTwinesScratched()
           }
         } else {

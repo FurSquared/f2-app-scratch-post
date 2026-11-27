@@ -147,17 +147,15 @@ export function createHeaven(
       `
       attribute vec3 position, normal;
       attribute vec2 uv;
-      uniform vec2 spring, scratchLean;
+      uniform vec2 spring;
       ${projection}
       varying vec3 n;
       varying vec2 st;
       void main() {
         vec3 p = position;
-        float t = clamp(p.y / .8, 0., 1.);
-        p.y = p.y * (1. - spring.y) + spring.x;
-        p.xz += scratchLean * t * t;
-        float normalY = (normal.y - dot(normal.xz, scratchLean) * t * 2.5) / (1. - spring.y);
-        n = normalize(vec3(normal.x, normalY, normal.z));
+        float stretch = 1. - spring.y;
+        p.y = p.y * stretch + spring.x;
+        n = normalize(vec3(normal.x, normal.y / stretch, normal.z));
         st = uv;
         gl_Position = project(p);
       }`,
@@ -359,7 +357,6 @@ export function createHeaven(
     gl.getAttribLocation(spriteProgram, name)
   )
   const springLocation = gl.getUniformLocation(modelProgram, 'spring')
-  const leanLocation = gl.getUniformLocation(modelProgram, 'scratchLean')
   const sheenLocation = gl.getUniformLocation(modelProgram, 'sheen')
   function camera(binding: typeof modelCamera) {
     gl.uniform3fv(binding.right, right)
@@ -423,7 +420,6 @@ export function createHeaven(
   const offsets = new Float32Array(maxFibers * 13)
   let fibers = 0
   let scratchRemainder = 0
-  let scratchLean = 0
   let bounce = 0
   let bounceV = 0
   let scaleX = 2,
@@ -484,8 +480,8 @@ export function createHeaven(
   function hit(x: number, y: number, w: number, h: number) {
     const sx = ((x / w) * 2 - 1) / scaleX
     const sy = (1 - (y / h) * 2) / scaleY
-    const ox = sx * right[0] + sy * up[0] - scratchLean * right[0] * 0.25
-    const oz = sx * right[2] + sy * up[2] - scratchLean * right[2] * 0.25
+    const ox = sx * right[0] + sy * up[0]
+    const oz = sx * right[2] + sy * up[2]
     const horizontal = eye[0] ** 2 + eye[2] ** 2
     const middle = -(ox * eye[0] + oz * eye[2]) / horizontal
     const nx = ox + middle * eye[0]
@@ -503,22 +499,19 @@ export function createHeaven(
   }
   function scratch(
     point: { x: number; y: number; z: number },
-    dx: number,
-    dy: number,
+    distance: number,
     speed: number,
     width: number
   ) {
-    const amount = clamp(speed / 2100, 0.01, 1)
-    const sign = Math.sign(dx || dy)
-    scratchLean = clamp(scratchLean + sign * amount * 0.016, -0.067, 0.067)
-    bounceV += Math.min(0.13, Math.abs(dy) * 0.007) * amount
-    scratchRemainder += Math.hypot(dx, dy)
+    const amount = clamp(speed / 1800, 0.01, 1)
+    bounceV += Math.min(0.18, distance * 0.011) * amount
+    scratchRemainder += distance
     const interval = Math.max(12, width * 0.042)
     if (scratchRemainder < interval) {
       return false
     }
     scratchRemainder %= interval
-    fiber(point.x, point.y, point.z, amount)
+    fiber(point.x, point.y * (1 - bounce), point.z, amount)
     return true
   }
 
@@ -691,8 +684,6 @@ export function createHeaven(
       landingKick = true
       bounceV = 1.95
     }
-    // Scratch lean follows the pointer and relaxes without a lateral rebound.
-    scratchLean *= Math.exp(-9 * dt)
     bounceV += (-43 * bounce - (landingTime >= 0 ? 2.9 : 4.4) * bounceV) * dt
     bounce = clamp(bounce + bounceV * dt, -0.19, 0.26)
     gl.clearColor(0, 0, 0, 0)
@@ -703,7 +694,6 @@ export function createHeaven(
     gl.useProgram(modelProgram)
     camera(modelCamera)
     gl.uniform2f(springLocation, drop, bounce)
-    gl.uniform2f(leanLocation, scratchLean * right[0], scratchLean * right[2])
     for (const location of modelAttrs) {
       gl.enableVertexAttribArray(location)
     }

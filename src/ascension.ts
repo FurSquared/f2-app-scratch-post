@@ -1,22 +1,64 @@
 export const ascensionStorageKey = 'ascended'
 export const ascensionTokens = 8
+export const ascensionIntroDuration = 950
 export const burnDuration = 30_000
 export const revealDuration = 2_000
 export const landingDuration = 4_000
-export const ascensionDuration = burnDuration + revealDuration + landingDuration
+export const ascensionDuration =
+  ascensionIntroDuration + burnDuration + revealDuration + landingDuration
 
 type Frame = { x: number; y: number; width: number; height: number }
-type Token = (x: number, y: number, radius: number, alpha: number, rotation: number) => void
+type Token = (
+  x: number,
+  y: number,
+  radius: number,
+  alpha: number,
+  rotation: number,
+  artworkRadius: number
+) => void
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
 const mix = (a: number, b: number, t: number) => a + (b - a) * t
 const pixel = (r: number, g: number, b: number, a = 255) => r | (g << 8) | (b << 16) | (a << 24)
 const tokenDuration = burnDuration / ascensionTokens
 
-export function createAscensionFire(image: HTMLImageElement) {
+export function sacrificeRuneRadius(w: number, h: number) {
+  return Math.max(34, Math.min(68, w * 0.15, h * 0.11))
+}
+
+export function sacrificeRunePose(timestamp: number, w: number, h: number, index: number) {
+  const radius = sacrificeRuneRadius(w, h)
+  const row = Math.floor(index / 2)
+  const right = index % 2 === 0
+  const phase = index * 1.73
+  const speed = 0.00055 + index * 0.00009
+  const hover = 4 + (index % 3) * 1.5
+  return {
+    x:
+      (right ? w - radius * 0.72 : radius * 0.72) +
+      Math.cos(timestamp * speed * 0.73 + phase) * hover * 0.35,
+    y:
+      radius * 0.85 +
+      (Math.max(0, h - radius * 1.7) * row) / 4 +
+      Math.sin(timestamp * speed + phase) * hover,
+    rotation: timestamp * (0.000045 + index * 0.000014) * (right ? 1 : -1) + phase,
+  }
+}
+
+export function createAscensionFire(
+  image: HTMLImageElement,
+  sourceTimestamp: number,
+  sourceRunes: number
+) {
   const bitmap = image.ownerDocument.createElement('canvas')
   const width = 104
   const height = Math.round((width * image.naturalHeight) / image.naturalWidth)
+  let transitionCanvas: HTMLCanvasElement | undefined
+  let transitionContext: CanvasRenderingContext2D | undefined
+  const rotationOffsets = Array.from({ length: ascensionTokens }, (_, index) => {
+    const difference = sacrificeRunePose(sourceTimestamp, 0, 0, index).rotation - index
+    return Math.atan2(Math.sin(difference), Math.cos(difference))
+  })
   bitmap.width = width
   bitmap.height = height
   const pixels = bitmap.getContext('2d', { willReadFrequently: true })!
@@ -184,8 +226,9 @@ export function createAscensionFire(image: HTMLImageElement) {
     frame: Frame,
     token: Token
   ) {
-    const time = Math.min(elapsed, burnDuration)
-    simulate(time)
+    const time = Math.max(0, Math.min(elapsed, burnDuration))
+    const progress = clamp(1 + elapsed / ascensionIntroDuration)
+    const intro = progress * progress * (3 - 2 * progress)
     if (!backdrop || previousWidth !== w || previousHeight !== h) {
       previousWidth = w
       previousHeight = h
@@ -200,13 +243,61 @@ export function createAscensionFire(image: HTMLImageElement) {
       ctx.translate(0, h * (u * u * (3 - 2 * u)))
     }
     ctx.fillStyle = backdrop
+    ctx.globalAlpha = intro
     ctx.fillRect(0, 0, w, h)
-    ctx.imageSmoothingEnabled = false
-    ctx.drawImage(bitmap, frame.x, frame.y, frame.width, frame.height)
+    ctx.globalAlpha = 1
+    if (elapsed < 0) {
+      const pixelRatio = ctx.getTransform().a
+      const nativeWidth = Math.max(width, Math.min(512, Math.round(frame.width * pixelRatio)))
+      const nativeHeight = Math.round((nativeWidth * height) / width)
+      if (!transitionCanvas) {
+        transitionCanvas = image.ownerDocument.createElement('canvas')
+        transitionContext = transitionCanvas.getContext('2d') ?? undefined
+      }
+      if (transitionCanvas.width !== nativeWidth || transitionCanvas.height !== nativeHeight) {
+        transitionCanvas.width = nativeWidth
+        transitionCanvas.height = nativeHeight
+      }
+      const blend = clamp(intro * 3.5)
+      if (blend < 1 || !transitionContext) {
+        ctx.drawImage(image, frame.x, frame.y, frame.width, frame.height)
+      }
+      if (transitionContext && blend > 0) {
+        // Keep one buffer and progressively sample a smaller grid, then draw it with nearest filtering.
+        const sampleWidth = Math.round(mix(nativeWidth, width, intro))
+        const sampleHeight = Math.round((sampleWidth * height) / width)
+        transitionContext.clearRect(0, 0, sampleWidth, sampleHeight)
+        transitionContext.drawImage(image, 0, 0, sampleWidth, sampleHeight)
+        ctx.imageSmoothingEnabled = false
+        ctx.globalAlpha = blend
+        ctx.drawImage(
+          transitionCanvas,
+          0,
+          0,
+          sampleWidth,
+          sampleHeight,
+          frame.x,
+          frame.y,
+          frame.width,
+          frame.height
+        )
+        ctx.globalAlpha = 1
+      }
+    } else {
+      transitionCanvas = undefined
+      transitionContext = undefined
+      simulate(time)
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(bitmap, frame.x, frame.y, frame.width, frame.height)
+    }
 
     const active = Math.floor(time / tokenDuration)
     const step = time / tokenDuration - active
     const launch = clamp(step * 4)
+    const wake = clamp(step * 6)
+    const ignition = wake * wake * (3 - 2 * wake)
+    const artworkRadius = sacrificeRuneRadius(w, h)
+    const ritualRadius = Math.min(w * 0.067, 26)
     for (let n = active; n < ascensionTokens; n += 1) {
       const onRight = n % 2 === 0
       const rail = onRight ? w - Math.min(43, w * 0.12) : Math.min(43, w * 0.12)
@@ -217,11 +308,19 @@ export function createAscensionFire(image: HTMLImageElement) {
       const shift = isActive ? launch * launch : 0
       const x = mix(rail, focusX, shift * 0.78)
       const y = mix(railY + Math.sin(time * 0.003 + n) * 3, focusY, shift)
-      const alpha = isActive ? 1 - clamp((step - 0.51) / 0.4) : 0.48
+      const alpha = isActive ? mix(0.48, 1, ignition) * (1 - clamp((step - 0.51) / 0.4)) : 0.48
+      const source = elapsed < 0 ? sacrificeRunePose(sourceTimestamp, w, h, n) : undefined
       if (alpha > 0.01) {
-        token(x, y, Math.min(w * 0.067, 26) * (isActive ? 1.14 : 1), alpha, time * 0.001 + n)
+        token(
+          source ? mix(source.x, x, intro) : x,
+          source ? mix(source.y, y, intro) : y,
+          mix(artworkRadius, ritualRadius * (isActive ? 1 + 0.14 * ignition : 1), intro),
+          mix(0.78, alpha, intro),
+          time * 0.001 + n + rotationOffsets[n] * (1 - intro),
+          artworkRadius
+        )
       }
-      if (!isActive || step > 0.86) {
+      if (elapsed < 0 || !isActive || step > 0.86) {
         continue
       }
 
@@ -232,7 +331,7 @@ export function createAscensionFire(image: HTMLImageElement) {
         const spread = Math.sin(p * 7.13 + step * 4) * (6 + (p % 11)) * phase
         const emberX = mix(x, focusX, Math.min(1, phase * 1.8)) + spread
         const emberY = mix(y, focusY, phase) - (p % 9) * phase * 3 + phase * phase * 25
-        ctx.globalAlpha = (1 - phase) * (0.8 - step * 0.56)
+        ctx.globalAlpha = (1 - phase) * (0.8 - step * 0.56) * ignition
         ctx.fillStyle = p % 6 === 0 ? '#fff1a6' : p % 3 ? '#ff883b' : '#f73c32'
         ctx.fillRect(
           Math.round(emberX / scale) * scale,
@@ -242,6 +341,19 @@ export function createAscensionFire(image: HTMLImageElement) {
         )
       }
       ctx.globalAlpha = 1
+    }
+    if (elapsed < 0) {
+      for (let n = ascensionTokens; n < sourceRunes; n += 1) {
+        const source = sacrificeRunePose(sourceTimestamp, w, h, n)
+        token(
+          source.x,
+          source.y,
+          artworkRadius * (1 - intro * 0.65),
+          0.78 * (1 - intro),
+          source.rotation,
+          artworkRadius
+        )
+      }
     }
     ctx.restore()
   }
