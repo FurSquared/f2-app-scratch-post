@@ -1,11 +1,12 @@
 export const ascensionStorageKey = 'ascended'
 export const ascensionTokens = 8
 export const ascensionIntroDuration = 950
-export const burnDuration = 30_000
 export const revealDuration = 2_000
 export const landingDuration = 4_000
 export const fallDurationSeconds = 0.87
-export const runeDuration = burnDuration / ascensionTokens
+const castDuration = 3_750
+const runeInterval = 2_800
+export const burnDuration = (ascensionTokens - 1) * runeInterval + castDuration
 export const ascensionDuration =
   ascensionIntroDuration + burnDuration + revealDuration + landingDuration
 
@@ -22,6 +23,10 @@ type Token = (
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
 const mix = (a: number, b: number, t: number) => a + (b - a) * t
 const pixel = (r: number, g: number, b: number, a = 255) => r | (g << 8) | (b << 16) | (a << 24)
+
+export function ascensionRuneAt(time: number) {
+  return Math.min(ascensionTokens - 1, Math.floor(Math.max(0, time) / runeInterval))
+}
 
 export function sacrificeRuneRadius(w: number, h: number) {
   return Math.max(34, Math.min(68, w * 0.15, h * 0.11))
@@ -90,7 +95,7 @@ export function createAscensionFire(
     const band = Math.min(ascensionTokens - 1, Math.floor(row))
     bandByCell[i] = band
     const local = clamp((row - band) * 0.55 + spread + Math.random() * 0.34)
-    deadline[i] = band * runeDuration + 170 + local * 1740
+    deadline[i] = band * runeInterval + 170 + local * 1740
     heat[i] = Number.POSITIVE_INFINITY
     grains[i] = Math.floor(Math.random() * 24)
   }
@@ -158,7 +163,7 @@ export function createAscensionFire(
       if (source >>> 24 < 80 || consumed[i]) {
         continue
       }
-      const start = bandByCell[i] * runeDuration
+      const start = bandByCell[i] * runeInterval
       if (
         now >= deadline[i] ||
         (now > start + 260 &&
@@ -292,36 +297,40 @@ export function createAscensionFire(
       ctx.drawImage(bitmap, frame.x, frame.y, frame.width, frame.height)
     }
 
-    const active = Math.floor(time / runeDuration)
-    const step = time / runeDuration - active
-    const launch = clamp(step * 4)
-    const wake = clamp(step * 6)
-    const ignition = wake * wake * (3 - 2 * wake)
+    const active = ascensionRuneAt(time)
     const artworkRadius = sacrificeRuneRadius(w, h)
     const ritualRadius = Math.min(w * 0.067, 26)
-    for (let n = active; n < ascensionTokens; n += 1) {
+    // The outgoing sparks can finish while the next rune starts its own cast.
+    for (let n = Math.max(0, active - 1); n < ascensionTokens; n += 1) {
+      const casting = n <= active
+      const step = Math.max(0, (time - n * runeInterval) / castDuration)
+      if (casting && step >= 0.91) {
+        continue
+      }
+      const launch = clamp(step * 4)
+      const wake = clamp(step * 6)
+      const ignition = wake * wake * (3 - 2 * wake)
       const onRight = n % 2 === 0
       const rail = onRight ? w - Math.min(43, w * 0.12) : Math.min(43, w * 0.12)
       const railY = h * (0.15 + 0.22 * Math.floor(n / 2))
       const focusY = frame.y + frame.height * ((n + 0.48) / ascensionTokens)
       const focusX = frame.x + frame.width * (onRight ? 0.61 : 0.43)
-      const isActive = n === active
-      const shift = isActive ? launch * launch : 0
+      const shift = casting ? launch * launch : 0
       const x = mix(rail, focusX, shift * 0.78)
       const y = mix(railY + Math.sin(time * 0.003 + n) * 3, focusY, shift)
-      const alpha = isActive ? mix(0.48, 1, ignition) * (1 - clamp((step - 0.51) / 0.4)) : 0.48
+      const alpha = casting ? mix(0.48, 1, ignition) * (1 - clamp((step - 0.51) / 0.4)) : 0.48
       const source = elapsed < 0 ? sacrificeRunePose(sourceTimestamp, w, h, n) : undefined
       if (alpha > 0.01) {
         token(
           source ? mix(source.x, x, intro) : x,
           source ? mix(source.y, y, intro) : y,
-          mix(artworkRadius, ritualRadius * (isActive ? 1 + 0.14 * ignition : 1), intro),
+          mix(artworkRadius, ritualRadius * (casting ? 1 + 0.14 * ignition : 1), intro),
           mix(0.78, alpha, intro),
           time * 0.001 + n + rotationOffsets[n] * (1 - intro),
           artworkRadius
         )
       }
-      if (elapsed < 0 || !isActive || step > 0.86) {
+      if (elapsed < 0 || !casting || step > 0.86) {
         continue
       }
 

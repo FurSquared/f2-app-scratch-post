@@ -1,6 +1,6 @@
 import {
-  ascensionDuration, ascensionIntroDuration, ascensionStorageKey, ascensionTokens, burnDuration,
-  createAscensionFire, fallDurationSeconds, revealDuration, runeDuration,
+  ascensionDuration, ascensionIntroDuration, ascensionRuneAt, ascensionStorageKey, ascensionTokens, burnDuration,
+  createAscensionFire, fallDurationSeconds, revealDuration,
   sacrificeRunePose, sacrificeRuneRadius,
 } from './ascension.js'
 import { createHeaven } from './heaven.js'
@@ -2924,7 +2924,7 @@ function createScratchPostApp(): MicroApp {
             const phase = burnTime < 0 ? 'runes' : !revealing ? 'burn' : landing < 0 ? 'reveal' : 'landing'
             const phaseChanged = surface.dataset.scratchPostPhase !== phase
             setPhase(phase)
-            const cue = phase === 'burn' ? Math.floor(burnTime / runeDuration)
+            const cue = phase === 'burn' ? ascensionRuneAt(burnTime)
               : landing >= fallDurationSeconds ? ascensionTokens : -1
             if (cue > ritual.lastCue) {
               ritual.lastCue = cue
