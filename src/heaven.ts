@@ -44,6 +44,7 @@ const ground = 0.032
 const isSisalHeight = (height: number) =>
   height >= 0.089 && height <= 0.733 && (height <= 0.406 || height >= 0.421)
 const tau = Math.PI * 2
+const postTurnRate = tau / 40
 const maxFibers = 360
 const iconColumns = 8
 const iconRows = 4
@@ -151,15 +152,20 @@ export function createHeaven(
       `
       attribute vec3 position, normal;
       attribute vec2 uv;
-      uniform vec2 spring;
+      uniform vec2 spring, postRotation;
       ${projection}
       varying vec3 n;
       varying vec2 st;
       void main() {
-        vec3 p = position;
+        mat2 turn = mat2(postRotation.x, -postRotation.y, postRotation.y, postRotation.x);
         float stretch = 1. - spring.y;
-        p.y = p.y * stretch + spring.x;
-        n = normalize(vec3(normal.x, normal.y / stretch, normal.z));
+        vec3 p;
+        p.xz = turn * position.xz;
+        p.y = position.y * stretch + spring.x;
+        vec3 stretchedNormal;
+        stretchedNormal.xz = turn * normal.xz;
+        stretchedNormal.y = normal.y / stretch;
+        n = normalize(stretchedNormal);
         st = uv;
         gl_Position = project(p);
       }`,
@@ -361,6 +367,7 @@ export function createHeaven(
     gl.getAttribLocation(spriteProgram, name)
   )
   const springLocation = gl.getUniformLocation(modelProgram, 'spring')
+  const postRotationLocation = gl.getUniformLocation(modelProgram, 'postRotation')
   const sheenLocation = gl.getUniformLocation(modelProgram, 'sheen')
   function camera(binding: typeof modelCamera) {
     gl.uniform3fv(binding.right, right)
@@ -432,6 +439,7 @@ export function createHeaven(
   let visible = false
   let previousTime = 0
   let time = 0
+  let postAngle = 0
   let previousHandCount = 0
   let handClock = 0
   let handSpeed = 1
@@ -572,7 +580,9 @@ export function createHeaven(
     )
   }
 
-  function renderFibers(dt: number) {
+  function renderFibers(dt: number, postStep: number, postCos: number, postSin: number) {
+    const stepCos = Math.cos(postStep)
+    const stepSin = Math.sin(postStep)
     for (let n = 0; n < fibers; ) {
       const i = n * 13
       let x = offsets[i],
@@ -585,7 +595,13 @@ export function createHeaven(
         lastSwept.copyWithin(n * 10, last * 10, (last + 1) * 10)
         continue
       }
-      if (offsets[i + 12] !== 1) {
+      if (offsets[i + 12] === 1) {
+        // Strands resting on the pad turn with it until swept off.
+        const rotatedX = stepCos * x + stepSin * z
+        z = stepCos * z - stepSin * x
+        x = rotatedX
+        offsets[i + 6] -= postStep
+      } else {
         const previousY = y
         offsets[i + 4] -= 2.1 * dt
         x += offsets[i + 3] * dt
@@ -602,18 +618,18 @@ export function createHeaven(
         if (
           y <= ground &&
           previousY >= ground &&
-          Math.abs(x) < padHalf - 0.004 &&
-          Math.abs(z) < padHalf - 0.004 &&
+          Math.abs(postCos * x - postSin * z) < padHalf - 0.004 &&
+          Math.abs(postSin * x + postCos * z) < padHalf - 0.004 &&
           offsets[i + 12] !== 2
         ) {
           offsets[i + 12] = 1
           y = ground + 0.001 + (n % 5) * 0.0008
           offsets[i + 3] = offsets[i + 4] = offsets[i + 5] = 0
         }
-        offsets[i] = x
-        offsets[i + 1] = y
-        offsets[i + 2] = z
       }
+      offsets[i] = x
+      offsets[i + 1] = y
+      offsets[i + 2] = z
       const a = offsets[i + 6]
       const len = offsets[i + 8] * 0.24
       const width = offsets[i + 9]
@@ -682,6 +698,10 @@ export function createHeaven(
     const dt = previousTime && timestamp ? clamp((timestamp - previousTime) / 1000, 0, 0.034) : 0
     previousTime = timestamp
     time += dt
+    const postStep = landingTime < 0 && drop === 0 ? postTurnRate * dt : 0
+    postAngle = (postAngle + postStep) % tau
+    const postCos = Math.cos(postAngle)
+    const postSin = Math.sin(postAngle)
     if (landingTime >= fallDurationSeconds && !landingKick) {
       landingKick = true
       bounceV = 1.95
@@ -696,6 +716,7 @@ export function createHeaven(
     gl.useProgram(modelProgram)
     camera(modelCamera)
     gl.uniform2f(springLocation, drop, bounce)
+    gl.uniform2f(postRotationLocation, postCos, postSin)
     for (const location of modelAttrs) {
       gl.enableVertexAttribArray(location)
     }
@@ -735,7 +756,7 @@ export function createHeaven(
       const z = Math.cos(pose.angle) * pose.radius
       billboard(x, pose.y * (1 - bounce), z, 0.048, Math.sin(pose.angle - yaw) * 0.48, tier)
     })
-    renderFibers(dt)
+    renderFibers(dt, postStep, postCos, postSin)
     if (!vertexOffset) {
       return
     }
