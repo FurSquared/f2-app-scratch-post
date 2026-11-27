@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.6.0...v0.7.0) (2026-11-27)
+
+
+### Features
+
+* Implement ascension ([#15](https://github.com/FurSquared/f2-app-scratch-post/issues/15)) ([430ba76](https://github.com/FurSquared/f2-app-scratch-post/commit/430ba76305cf7a93da1500c9677212cc4ee03fe5))
+
 ## [0.6.0](https://github.com/FurSquared/f2-app-scratch-post/compare/v0.5.0...v0.6.0) (2026-08-20)
 
 
