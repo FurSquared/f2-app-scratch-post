@@ -4,6 +4,8 @@ export const ascensionIntroDuration = 950
 export const burnDuration = 30_000
 export const revealDuration = 2_000
 export const landingDuration = 4_000
+export const fallDurationSeconds = 0.87
+export const runeDuration = burnDuration / ascensionTokens
 export const ascensionDuration =
   ascensionIntroDuration + burnDuration + revealDuration + landingDuration
 
@@ -20,7 +22,6 @@ type Token = (
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
 const mix = (a: number, b: number, t: number) => a + (b - a) * t
 const pixel = (r: number, g: number, b: number, a = 255) => r | (g << 8) | (b << 16) | (a << 24)
-const tokenDuration = burnDuration / ascensionTokens
 
 export function sacrificeRuneRadius(w: number, h: number) {
   return Math.max(34, Math.min(68, w * 0.15, h * 0.11))
@@ -89,7 +90,7 @@ export function createAscensionFire(
     const band = Math.min(ascensionTokens - 1, Math.floor(row))
     bandByCell[i] = band
     const local = clamp((row - band) * 0.55 + spread + Math.random() * 0.34)
-    deadline[i] = band * tokenDuration + 170 + local * 1740
+    deadline[i] = band * runeDuration + 170 + local * 1740
     heat[i] = Number.POSITIVE_INFINITY
     grains[i] = Math.floor(Math.random() * 24)
   }
@@ -157,7 +158,7 @@ export function createAscensionFire(
       if (source >>> 24 < 80 || consumed[i]) {
         continue
       }
-      const start = bandByCell[i] * tokenDuration
+      const start = bandByCell[i] * runeDuration
       if (
         now >= deadline[i] ||
         (now > start + 260 &&
@@ -291,8 +292,8 @@ export function createAscensionFire(
       ctx.drawImage(bitmap, frame.x, frame.y, frame.width, frame.height)
     }
 
-    const active = Math.floor(time / tokenDuration)
-    const step = time / tokenDuration - active
+    const active = Math.floor(time / runeDuration)
+    const step = time / runeDuration - active
     const launch = clamp(step * 4)
     const wake = clamp(step * 6)
     const ignition = wake * wake * (3 - 2 * wake)

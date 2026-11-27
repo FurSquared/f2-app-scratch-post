@@ -1,10 +1,23 @@
 import {
   ascensionDuration, ascensionIntroDuration, ascensionStorageKey, ascensionTokens, burnDuration,
-  createAscensionFire, revealDuration, sacrificeRunePose, sacrificeRuneRadius,
+  createAscensionFire, fallDurationSeconds, revealDuration, runeDuration,
+  sacrificeRunePose, sacrificeRuneRadius,
 } from './ascension.js'
 import { createHeaven } from './heaven.js'
 
 const modelAsset = new URL('../assets/scratch-post.glb', import.meta.url)
+const ascensionSoundAssets = {
+  whoosh: {
+    url: new URL('../assets/ascension/floraphonic-fireball-whoosh-2-179126.mp3', import.meta.url),
+    gain: 0.45,
+  },
+  spring: {
+    url: new URL('../assets/ascension/universfield-cartoon-spring-229137.mp3', import.meta.url),
+    gain: 0.55,
+  },
+}
+type AscensionSound = keyof typeof ascensionSoundAssets
+
 const motionMargin = 10
 const inputHoldMilliseconds = 250
 const intensityWindowMilliseconds = 120
@@ -666,6 +679,8 @@ function createScratchAudio(audio?: MicroAppAudio) {
       resume: () => {},
       setIntensity: (_intensity: number, _rampSeconds?: number) => {},
       silence: () => {},
+      preloadAscension: async () => {},
+      playAscension: (_cue: AscensionSound) => {},
       playDing: () => {},
       playThump: () => {},
       playMew: () => {},
@@ -691,6 +706,29 @@ function createScratchAudio(audio?: MicroAppAudio) {
   }>()
   let destroyed = false
   let lastIntensity = 0
+  const ascensionSamples: Partial<Record<AscensionSound, AudioBuffer>> = {}
+  const ascensionRequests = new AbortController()
+  let ascensionPreload: Promise<void> | undefined
+
+  const preloadAscension = () =>
+    ascensionPreload ??= (async () => {
+      const timeout = setTimeout(() => ascensionRequests.abort(), 4_000)
+      try {
+        await Promise.allSettled(
+          (['whoosh', 'spring'] as const).map(async (cue) => {
+            const response = await fetch(ascensionSoundAssets[cue].url, {
+              signal: ascensionRequests.signal,
+            })
+            if (response.ok) {
+              const data = await response.arrayBuffer()
+              ascensionSamples[cue] = await currentAudio.context.decodeAudioData(data)
+            }
+          })
+        )
+      } finally {
+        clearTimeout(timeout)
+      }
+    })()
 
   const createPersistentGraph = ({
     context,
@@ -818,6 +856,21 @@ function createScratchAudio(audio?: MicroAppAudio) {
       soundSource.start(startAt)
       soundSource.stop(startAt + duration)
     })
+  }
+
+  const playAscension = (cue: AscensionSound) => {
+    const buffer = ascensionSamples[cue]
+    if (!buffer || destroyed) {
+      return
+    }
+    const { context, destination } = currentAudio
+    const source = context.createBufferSource()
+    const gain = context.createGain()
+    source.buffer = buffer
+    gain.gain.value = ascensionSoundAssets[cue].gain
+    source.connect(gain)
+    gain.connect(destination)
+    scheduleSound([source], [source, gain], context.currentTime, buffer.duration)
   }
 
   const playDing = () => {
@@ -1027,6 +1080,8 @@ function createScratchAudio(audio?: MicroAppAudio) {
       setIntensity(0, 0)
       stopActiveSounds()
     },
+    preloadAscension,
+    playAscension,
     playDing,
     playThump,
     playMew,
@@ -1037,6 +1092,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
         return
       }
       destroyed = true
+      ascensionRequests.abort()
       unsubscribeFromRecovery?.()
       stopActiveSounds()
       destroyPersistentGraph(persistentGraph)
@@ -1168,6 +1224,7 @@ function createScratchPostApp(): MicroApp {
       let heaven: ReturnType<typeof createHeaven>
       let attemptedWebGL = false
       let restoredModelRequested = false
+      let preparingAscension = false
       let hudAt = Number.NEGATIVE_INFINITY
       let hudDirty = true
       const tierCounts = autoScratcherDefinitions.map(() => 0)
@@ -1178,6 +1235,7 @@ function createScratchPostApp(): MicroApp {
         scratchers: ReturnType<typeof storedAutoScratcherCounts>
         sacrifices: number
         warmed: boolean
+        lastCue: number
       } | undefined
 
       const ascendButton = surface.ownerDocument.createElement('button')
@@ -1270,6 +1328,7 @@ function createScratchPostApp(): MicroApp {
         }
         const { scratchers, sacrifices } = ritual
         ritual = undefined
+        scratchAudio.silence()
         lastAutomaticProgressAt = performance.now()
         humanHandSacrifices = sacrifices
         setActorCounts(scratchers)
@@ -1280,10 +1339,22 @@ function createScratchPostApp(): MicroApp {
         requestDraw()
       }
 
-      const beginRitual = () => {
+      const beginRitual = async () => {
+        if (!appActive || preparingAscension || !canAscend()) {
+          return
+        }
+
+        // Unlock audio while the click still provides a user gesture.
+        scratchAudio.resume()
+        preparingAscension = true
+        ascendButton.disabled = true
+        await scratchAudio.preloadAscension()
+        preparingAscension = false
+        ascendButton.disabled = false
         if (!appActive || !canAscend() || !heaven) {
           return
         }
+
         const now = performance.now()
         void persistAppState()
         ritual = {
@@ -1294,6 +1365,7 @@ function createScratchPostApp(): MicroApp {
           scratchers: storedAutoScratcherCounts(),
           sacrifices: humanHandSacrifices,
           warmed: false,
+          lastCue: -1,
         }
         setActorCounts()
         humanHandSacrifices = 0
@@ -1311,7 +1383,9 @@ function createScratchPostApp(): MicroApp {
         })
         requestDraw()
       }
-      ascendButton.addEventListener('click', beginRitual)
+      ascendButton.addEventListener('click', () => {
+        void beginRitual()
+      })
       ascendButton.addEventListener('pointerdown', (event) => event.stopPropagation())
 
       const completeRitual = (timestamp: number) => {
@@ -2831,6 +2905,9 @@ function createScratchPostApp(): MicroApp {
         }
         const layout = imageLayout()
         const eligibility = canAscend()
+        if (eligibility && ascendButton.style.display !== 'flex') {
+          void scratchAudio.preloadAscension()
+        }
         ascendButton.style.display = eligibility ? 'flex' : 'none'
 
         if (ritual && heaven) {
@@ -2844,6 +2921,12 @@ function createScratchPostApp(): MicroApp {
             const phase = burnTime < 0 ? 'runes' : !revealing ? 'burn' : landing < 0 ? 'reveal' : 'landing'
             const phaseChanged = surface.dataset.scratchPostPhase !== phase
             setPhase(phase)
+            const cue = phase === 'burn' ? Math.floor(burnTime / runeDuration)
+              : landing >= fallDurationSeconds ? ascensionTokens : -1
+            if (cue > ritual.lastCue) {
+              ritual.lastCue = cue
+              scratchAudio.playAscension(cue === ascensionTokens ? 'spring' : 'whoosh')
+            }
             if (landing < 0 || phaseChanged) {
               context.clearRect(0, 0, displayWidth, displayHeight)
             }
@@ -2855,7 +2938,7 @@ function createScratchPostApp(): MicroApp {
             }
             if (revealing) {
               heaven.show(true)
-              const drop = 1.65 * (1 - Math.min(1, Math.max(0, landing / .87)) ** 2)
+              const drop = 1.65 * (1 - Math.min(1, Math.max(0, landing / fallDurationSeconds)) ** 2)
               heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, drop, landing, noTiers, 0, 0)
             }
             if (landing < 0) {
@@ -3206,7 +3289,11 @@ function createScratchPostApp(): MicroApp {
         animationFrame = 0
         surface.style.cursor = originalCursor
         resetPointer()
-        scratchAudio.setIntensity(0, audioFadeSeconds)
+        if (ritual) {
+          scratchAudio.silence()
+        } else {
+          scratchAudio.setIntensity(0, audioFadeSeconds)
+        }
       }
       resizeApp = resize
       destroyApp = () => {

@@ -1,4 +1,6 @@
 /** The ascended scene owns one WebGL canvas, two static textures, and a reusable sprite batch. */
+import { fallDurationSeconds } from './ascension.js'
+
 type Vec3 = [number, number, number]
 export type IconPainter = (
   ctx: CanvasRenderingContext2D,
@@ -680,7 +682,7 @@ export function createHeaven(
     const dt = previousTime && timestamp ? clamp((timestamp - previousTime) / 1000, 0, 0.034) : 0
     previousTime = timestamp
     time += dt
-    if (landingTime >= 0.87 && !landingKick) {
+    if (landingTime >= fallDurationSeconds && !landingKick) {
       landingKick = true
       bounceV = 1.95
     }

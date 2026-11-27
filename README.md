@@ -25,7 +25,7 @@ npm run build
 
 The Vite playground provides a draggable, resizable desktop window and exercises mount, resize, audio unlock, suspend, activate, destroy, and reopen behavior using `assets/scratch-post.webp`. Its shell lives outside the package `files` allowlist.
 
-With WebGL available, eight sacrifice tokens unlock **Ascend**. A short tween moves the runes into formation as the post pixelates. The silent burn then takes 30 seconds, followed by two seconds to reveal the sky and four seconds for the landing. The game saves the ascended state, consumed tokens, and new inventory together after the landing. Closing before then leaves the pre-ascension save available.
+With WebGL available, eight sacrifice tokens unlock **Ascend**. A short tween moves the runes into formation as the post pixelates. The burn then takes 30 seconds, followed by two seconds to reveal the sky and four seconds for the landing. When Ascend is available and the host provides audio, the game preloads the packaged whoosh (Floraphonic) and spring (Universfield) sound effects. The game saves the ascended state, consumed tokens, and new inventory together after the landing. Closing before then leaves the pre-ascension save available.
 
 In the playground, **Toggle ascension** opens the ascended game directly. Toggle it again to return to 2D with eight tokens and try the full sequence.
 
