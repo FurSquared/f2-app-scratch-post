@@ -147,17 +147,17 @@ export function createHeaven(
       `
       attribute vec3 position, normal;
       attribute vec2 uv;
-      uniform vec4 spring;
+      uniform vec2 spring, scratchLean;
       ${projection}
       varying vec3 n;
       varying vec2 st;
       void main() {
         vec3 p = position;
         float t = clamp(p.y / .8, 0., 1.);
-        p.xz *= 1. + spring.y * .39 * t;
         p.y = p.y * (1. - spring.y) + spring.x;
-        p.xz += spring.zw * t * t;
-        n = normalize(normal - vec3(0., dot(normal.xz, spring.zw) * t * 1.55, 0.));
+        p.xz += scratchLean * t * t;
+        float normalY = (normal.y - dot(normal.xz, scratchLean) * t * 2.5) / (1. - spring.y);
+        n = normalize(vec3(normal.x, normalY, normal.z));
         st = uv;
         gl_Position = project(p);
       }`,
@@ -359,6 +359,7 @@ export function createHeaven(
     gl.getAttribLocation(spriteProgram, name)
   )
   const springLocation = gl.getUniformLocation(modelProgram, 'spring')
+  const leanLocation = gl.getUniformLocation(modelProgram, 'scratchLean')
   const sheenLocation = gl.getUniformLocation(modelProgram, 'sheen')
   function camera(binding: typeof modelCamera) {
     gl.uniform3fv(binding.right, right)
@@ -422,12 +423,9 @@ export function createHeaven(
   const offsets = new Float32Array(maxFibers * 13)
   let fibers = 0
   let scratchRemainder = 0
-  let tiltX = 0,
-    tiltZ = 0,
-    bounce = 0
-  let tiltVX = 0,
-    tiltVZ = 0,
-    bounceV = 0
+  let scratchLean = 0
+  let bounce = 0
+  let bounceV = 0
   let scaleX = 2,
     scaleY = 2
   let landingKick = false
@@ -486,14 +484,13 @@ export function createHeaven(
   function hit(x: number, y: number, w: number, h: number) {
     const sx = ((x / w) * 2 - 1) / scaleX
     const sy = (1 - (y / h) * 2) / scaleY
-    const ox = sx * right[0] + sy * up[0] - tiltX * 0.25
-    const oz = sx * right[2] + sy * up[2] - tiltZ * 0.25
+    const ox = sx * right[0] + sy * up[0] - scratchLean * right[0] * 0.25
+    const oz = sx * right[2] + sy * up[2] - scratchLean * right[2] * 0.25
     const horizontal = eye[0] ** 2 + eye[2] ** 2
     const middle = -(ox * eye[0] + oz * eye[2]) / horizontal
     const nx = ox + middle * eye[0]
     const nz = oz + middle * eye[2]
-    const radius = cylinderRadius * (1 + bounce * 0.2)
-    const chord = (radius * radius - nx * nx - nz * nz) / horizontal
+    const chord = (cylinderRadius * cylinderRadius - nx * nx - nz * nz) / horizontal
     if (chord < 0) {
       return undefined
     }
@@ -513,8 +510,7 @@ export function createHeaven(
   ) {
     const amount = clamp(speed / 2100, 0.01, 1)
     const sign = Math.sign(dx || dy)
-    tiltVX += right[0] * sign * amount * 0.14
-    tiltVZ += right[2] * sign * amount * 0.14
+    scratchLean = clamp(scratchLean + sign * amount * 0.016, -0.067, 0.067)
     bounceV += Math.min(0.13, Math.abs(dy) * 0.007) * amount
     scratchRemainder += Math.hypot(dx, dy)
     const interval = Math.max(12, width * 0.042)
@@ -694,14 +690,10 @@ export function createHeaven(
     if (landingTime >= 0.87 && !landingKick) {
       landingKick = true
       bounceV = 1.95
-      tiltVX = 0.39
-      tiltVZ = -0.19
     }
-    tiltVX += (-32 * tiltX - 5.9 * tiltVX) * dt
-    tiltVZ += (-32 * tiltZ - 5.9 * tiltVZ) * dt
+    // Scratch lean follows the pointer and relaxes without a lateral rebound.
+    scratchLean *= Math.exp(-9 * dt)
     bounceV += (-43 * bounce - (landingTime >= 0 ? 2.9 : 4.4) * bounceV) * dt
-    tiltX = clamp(tiltX + tiltVX * dt, -0.1, 0.1)
-    tiltZ = clamp(tiltZ + tiltVZ * dt, -0.1, 0.1)
     bounce = clamp(bounce + bounceV * dt, -0.19, 0.26)
     gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
@@ -710,7 +702,8 @@ export function createHeaven(
     gl.disable(gl.BLEND)
     gl.useProgram(modelProgram)
     camera(modelCamera)
-    gl.uniform4f(springLocation, drop, bounce, tiltX, tiltZ)
+    gl.uniform2f(springLocation, drop, bounce)
+    gl.uniform2f(leanLocation, scratchLean * right[0], scratchLean * right[2])
     for (const location of modelAttrs) {
       gl.enableVertexAttribArray(location)
     }
