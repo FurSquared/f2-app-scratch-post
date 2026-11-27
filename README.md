@@ -6,7 +6,7 @@ The framework-free canvas micro app behind the **Scratch Post** window on the Fu
 
 The package exports a versioned definition with a small lifecycle:
 
-- `mount` receives host-owned surface and canvas elements, a frame scheduler, the packaged image URL, and optional host-owned services.
+- `mount` receives host-owned surface and canvas elements, a frame scheduler, the packaged image URL, and optional host-owned services. A host can pass `modelUrl` to override the packaged GLB URL.
 - `activate` enables drawing and pointer interaction.
 - `suspend` stops drawing, pauses canvas simulation, and fades audio while the window or page is hidden. Purchased auto-scratchers continue advancing the persisted counter for as long as the app remains mounted.
 - `resize` receives the canvas content size and device pixel ratio.
@@ -24,5 +24,9 @@ npm run build
 ```
 
 The Vite playground provides a draggable, resizable desktop window and exercises mount, resize, audio unlock, suspend, activate, destroy, and reopen behavior using `assets/scratch-post.webp`. Its shell lives outside the package `files` allowlist.
+
+With WebGL available, eight sacrifice tokens unlock **Ascend**. A short tween moves the runes into formation as the post pixelates. The eight casts run back to back over about 23 seconds, followed by two seconds to reveal the sky and four seconds for the landing. When Ascend is available and the host provides audio, the game preloads the packaged whoosh (Floraphonic) and spring (Universfield) sound effects. The game resets the score to zero after the landing and saves it with the ascended state, consumed tokens, and new inventory. Closing before then leaves the pre-ascension save available.
+
+In the playground, **Toggle ascension** opens the ascended game directly. Toggle it again to return to 2D with eight tokens and try the full sequence.
 
 Publishing a `v*` tag runs the package checks and publishes the matching package version and image asset to GitHub Packages.

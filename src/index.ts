@@ -1,3 +1,23 @@
+import {
+  ascensionDuration, ascensionIntroDuration, ascensionRuneAt, ascensionStorageKey, ascensionTokens, burnDuration,
+  createAscensionFire, fallDurationSeconds, revealDuration,
+  sacrificeRunePose, sacrificeRuneRadius,
+} from './ascension.js'
+import { createHeaven } from './heaven.js'
+
+const modelAsset = new URL('../assets/scratch-post.glb', import.meta.url)
+const ascensionSoundAssets = {
+  whoosh: {
+    url: new URL('../assets/ascension/floraphonic-fireball-whoosh-2-179126.mp3', import.meta.url),
+    gain: 0.45,
+  },
+  spring: {
+    url: new URL('../assets/ascension/universfield-cartoon-spring-229137.mp3', import.meta.url),
+    gain: 0.55,
+  },
+}
+type AscensionSound = keyof typeof ascensionSoundAssets
+
 const motionMargin = 10
 const inputHoldMilliseconds = 250
 const intensityWindowMilliseconds = 120
@@ -249,6 +269,7 @@ export type MicroAppHost = {
   surface: HTMLElement
   canvas: HTMLCanvasElement
   imageUrl: string
+  modelUrl?: string
   audio?: MicroAppAudio
   storage?: MicroAppStorage
   signal: AbortSignal
@@ -657,6 +678,9 @@ function createScratchAudio(audio?: MicroAppAudio) {
     return {
       resume: () => {},
       setIntensity: (_intensity: number, _rampSeconds?: number) => {},
+      silence: () => {},
+      preloadAscension: async () => {},
+      playAscension: (_cue: AscensionSound) => {},
       playDing: () => {},
       playThump: () => {},
       playMew: () => {},
@@ -682,6 +706,29 @@ function createScratchAudio(audio?: MicroAppAudio) {
   }>()
   let destroyed = false
   let lastIntensity = 0
+  const ascensionSamples: Partial<Record<AscensionSound, AudioBuffer>> = {}
+  const ascensionRequests = new AbortController()
+  let ascensionPreload: Promise<void> | undefined
+
+  const preloadAscension = () =>
+    ascensionPreload ??= (async () => {
+      const timeout = setTimeout(() => ascensionRequests.abort(), 4_000)
+      try {
+        await Promise.allSettled(
+          (['whoosh', 'spring'] as const).map(async (cue) => {
+            const response = await fetch(ascensionSoundAssets[cue].url, {
+              signal: ascensionRequests.signal,
+            })
+            if (response.ok) {
+              const data = await response.arrayBuffer()
+              ascensionSamples[cue] = await currentAudio.context.decodeAudioData(data)
+            }
+          })
+        )
+      } finally {
+        clearTimeout(timeout)
+      }
+    })()
 
   const createPersistentGraph = ({
     context,
@@ -809,6 +856,21 @@ function createScratchAudio(audio?: MicroAppAudio) {
       soundSource.start(startAt)
       soundSource.stop(startAt + duration)
     })
+  }
+
+  const playAscension = (cue: AscensionSound) => {
+    const buffer = ascensionSamples[cue]
+    if (!buffer || destroyed) {
+      return
+    }
+    const { context, destination } = currentAudio
+    const source = context.createBufferSource()
+    const gain = context.createGain()
+    source.buffer = buffer
+    gain.gain.value = ascensionSoundAssets[cue].gain
+    source.connect(gain)
+    gain.connect(destination)
+    scheduleSound([source], [source, gain], context.currentTime, buffer.duration)
   }
 
   const playDing = () => {
@@ -1014,6 +1076,12 @@ function createScratchAudio(audio?: MicroAppAudio) {
   return {
     resume: () => currentAudio.resume(),
     setIntensity,
+    silence() {
+      setIntensity(0, 0)
+      stopActiveSounds()
+    },
+    preloadAscension,
+    playAscension,
     playDing,
     playThump,
     playMew,
@@ -1024,6 +1092,7 @@ function createScratchAudio(audio?: MicroAppAudio) {
         return
       }
       destroyed = true
+      ascensionRequests.abort()
       unsubscribeFromRecovery?.()
       stopActiveSounds()
       destroyPersistentGraph(persistentGraph)
@@ -1102,7 +1171,7 @@ function createScratchPostApp(): MicroApp {
       let humanHandSacrificesThisMount = 0
       const arcaneCircleSpriteCache = new Map<
         string,
-        { canvas: HTMLCanvasElement; size: number }
+        HTMLCanvasElement
       >()
       let sacrificeBackgroundGradientCache:
         | { width: number; height: number; gradient: CanvasGradient }
@@ -1144,6 +1213,199 @@ function createScratchPostApp(): MicroApp {
       let appActive = false
       let lastAutomaticProgressAt = performance.now()
       let suspendedAt: number | undefined
+
+      type ScenePhase = 'flat' | 'runes' | 'burn' | 'reveal' | 'landing' | 'ascended'
+      const setPhase = (phase: ScenePhase) => {
+        if (surface.dataset.scratchPostPhase !== phase) {
+          surface.dataset.scratchPostPhase = phase
+        }
+      }
+      let ascended = false
+      let heaven: ReturnType<typeof createHeaven>
+      let attemptedWebGL = false
+      let restoredModelRequested = false
+      let preparingAscension = false
+      let hudAt = Number.NEGATIVE_INFINITY
+      let hudDirty = true
+      const tierCounts = autoScratcherDefinitions.map(() => 0)
+      const noTiers: readonly number[] = []
+      let ritual: {
+        startedAt: number
+        fire: ReturnType<typeof createAscensionFire>
+        scratchers: ReturnType<typeof storedAutoScratcherCounts>
+        sacrifices: number
+        warmed: boolean
+        lastCue: number
+      } | undefined
+
+      const ascendButton = surface.ownerDocument.createElement('button')
+      const halo = surface.ownerDocument.createElement('canvas')
+      halo.width = 30
+      halo.height = 22
+      halo.setAttribute('aria-hidden', 'true')
+      Object.assign(halo.style, { width: '30px', height: '22px', flex: 'none' })
+      const haloPaint = halo.getContext('2d')
+      if (haloPaint) {
+        haloPaint.lineWidth = 3
+        haloPaint.strokeStyle = '#7b4b15'
+        haloPaint.beginPath()
+        haloPaint.ellipse(15, 11, 11.5, 4.8, -0.16, 0, Math.PI * 2)
+        haloPaint.stroke()
+        haloPaint.lineWidth = 1
+        haloPaint.strokeStyle = '#ffe396'
+        haloPaint.beginPath()
+        haloPaint.ellipse(15, 10, 11.5, 4.8, -0.16, 0, Math.PI * 2)
+        haloPaint.stroke()
+      }
+      ascendButton.type = 'button'
+      ascendButton.append(halo, 'Ascend')
+      Object.assign(ascendButton.style, {
+        position: 'absolute', zIndex: '2', right: '9px', top: '9px', padding: '4px 9px 4px 5px',
+        border: '2px outset #ffedba', color: '#39220e', background: '#fbe7b3',
+        font: 'bold 14px ui-monospace, monospace', alignItems: 'center', gap: '3px',
+        cursor: 'pointer', display: 'none',
+      })
+      ascendButton.title = 'Spend the sacrifice tokens and forfeit your scratchers'
+      surface.append(ascendButton)
+
+      const getHeaven = () => {
+        if (attemptedWebGL) {
+          return heaven
+        }
+        attemptedWebGL = true
+        heaven = createHeaven(surface, canvas, (ctx, slot, x, y) => {
+          if (slot < autoScratcherDefinitions.length) {
+            const definition = autoScratcherDefinitions[slot]
+            if (definition.icon === 'talon') {
+              drawTalon(ctx, { x, y, color: definition.color, scale: 1.75, strokeWidth: 1.3 })
+            } else {
+              drawPaw(ctx, { x, y, color: definition.color, scale: 1.70, strokeWidth: 1.3,
+                anchorX: 11, anchorY: 13, strokeColor: '#2a1f16' })
+            }
+          } else {
+            const color = humanHandActorColors[Math.floor((slot - 6) / 2)]
+            drawHand(ctx, { x, y, color, scale: 1.65, strokeWidth: 1.3,
+              variant: slot % 2 ? 'grab' : 'open' })
+          }
+        })
+        const scene = heaven
+        scene?.canvas.addEventListener('webglcontextlost', () => {
+          if (!mounted || heaven !== scene) {
+            return
+          }
+          if (ritual) {
+            cancelRitual()
+          } else {
+            scene.show(false)
+            requestDraw()
+          }
+        })
+        return scene
+      }
+
+      const canAscend = () =>
+        twinesScratchedLoaded && imageReady && !ascended && !ritual &&
+        humanHandSacrifices >= ascensionTokens && getHeaven()?.available === true
+
+      const setActorCounts = (counts?: ReturnType<typeof storedAutoScratcherCounts>) => {
+        for (const definition of autoScratcherDefinitions) {
+          const state = autoScratchers[definition.id]
+          state.actors.length = 0
+          particleGenerationCredits[definition.id] = 0
+          const count = counts?.[definition.id] ?? 0
+          for (let index = 0; index < count; index += 1) {
+            state.actors.push(createAutoScratcherActor(definition.id))
+          }
+          staggerAutoScratcherActors(definition)
+        }
+        humanHandsLevel = counts?.[humanHandsId] ?? 0
+        humanHandActors.length = 0
+      }
+
+      const cancelRitual = () => {
+        if (!ritual) {
+          return
+        }
+        const { scratchers, sacrifices } = ritual
+        ritual = undefined
+        scratchAudio.silence()
+        lastAutomaticProgressAt = performance.now()
+        humanHandSacrifices = sacrifices
+        setActorCounts(scratchers)
+        heaven?.destroy()
+        heaven = undefined
+        attemptedWebGL = false
+        resetPointer()
+        requestDraw()
+      }
+
+      const beginRitual = async () => {
+        if (!appActive || preparingAscension || !canAscend()) {
+          return
+        }
+
+        // Unlock audio while the click still provides a user gesture.
+        scratchAudio.resume()
+        preparingAscension = true
+        ascendButton.disabled = true
+        await scratchAudio.preloadAscension()
+        preparingAscension = false
+        ascendButton.disabled = false
+        if (!appActive || !canAscend() || !heaven) {
+          return
+        }
+
+        const now = performance.now()
+        void persistAppState()
+        ritual = {
+          startedAt: now,
+          fire: createAscensionFire(
+            image, lastFrameAt || now, Math.min(maximumDisplayedSacrificeCircles, humanHandSacrifices)
+          ),
+          scratchers: storedAutoScratcherCounts(),
+          sacrifices: humanHandSacrifices,
+          warmed: false,
+          lastCue: -1,
+        }
+        setActorCounts()
+        humanHandSacrifices = 0
+        twines = []
+        purchaseHitRegions = []
+        purchaseEmphasis.clear()
+        ascendButton.style.display = 'none'
+        resetPointer()
+        scratchAudio.silence()
+        const activeRitual = ritual
+        void heaven.prepare(host.modelUrl ?? modelAsset.href).catch(() => {
+          if (ritual === activeRitual) {
+            cancelRitual()
+          }
+        })
+        requestDraw()
+      }
+      ascendButton.addEventListener('click', () => {
+        void beginRitual()
+      })
+      ascendButton.addEventListener('pointerdown', (event) => event.stopPropagation())
+
+      const completeRitual = (timestamp: number) => {
+        ritual = undefined
+        ascended = true
+        heaven?.beginPlay()
+        hudDirty = true
+        lastAutomaticProgressAt = timestamp
+        twinesScratched = 0
+        twinesScratchedThisMount = 0
+        twinesScratchedDirty = true
+        const starter = autoScratcherDefinitions[0]
+        const bapper = createAutoScratcherActor(starter.id)
+        bapper.countdownSeconds = 1 / starter.twinesPerSecond
+        autoScratchers[starter.id].actors.push(bapper)
+        autoScratchersDirty = true
+        humanHandSacrificesDirty = true
+        // The score, inventory, and ascended flag become durable together after the landing.
+        void persistAppState()
+      }
 
       const staggerAutoScratcherActors = (
         definition: AutoScratcherDefinition,
@@ -1259,6 +1521,7 @@ function createScratchPostApp(): MicroApp {
       const persistAppState = async () => {
         if (
           !host.storage ||
+          !!ritual ||
           !twinesScratchedLoaded ||
           (!twinesScratchedDirty && !autoScratchersDirty && !humanHandSacrificesDirty)
         ) {
@@ -1273,6 +1536,7 @@ function createScratchPostApp(): MicroApp {
             [twinesScratchedStorageKey, count],
             [autoScratchersStorageKey, autoScratcherCounts],
             [humanHandSacrificesStorageKey, sacrificeCount],
+            [ascensionStorageKey, ascended],
           ])
           if (twinesScratched === count) {
             twinesScratchedDirty = false
@@ -1306,7 +1570,9 @@ function createScratchPostApp(): MicroApp {
             scratchCounterStorageKey,
             autoScratchersStorageKey,
             humanHandSacrificesStorageKey,
+            ascensionStorageKey,
           ])
+          ascended = storedState.get(ascensionStorageKey) === true
           const storedCount = storedState.get(twinesScratchedStorageKey)
           const validStoredCount =
             typeof storedCount === 'number' && Number.isSafeInteger(storedCount) && storedCount >= 0
@@ -1363,7 +1629,7 @@ function createScratchPostApp(): MicroApp {
             storedSacrificeCount >= 0
               ? storedSacrificeCount
               : 0
-          humanHandSacrifices = validSacrificeCount + humanHandSacrificesThisMount
+          humanHandSacrifices = ascended ? 0 : validSacrificeCount + humanHandSacrificesThisMount
           twinesScratchedDirty = twinesScratchedThisMount > 0
           autoScratchersDirty =
             humanHandsPurchasedThisMount > 0 ||
@@ -1495,6 +1761,7 @@ function createScratchPostApp(): MicroApp {
         const previousWidth = displayWidth
         const previousHeight = displayHeight
         pixelRatio = viewport.devicePixelRatio
+        hudDirty = true
         displayWidth = viewport.width
         displayHeight = viewport.height
         arcaneCircleSpriteCache.clear()
@@ -1972,9 +2239,8 @@ function createScratchPostApp(): MicroApp {
         spriteContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
         spriteContext.translate(size / 2, size / 2)
         drawArcaneCircleArtwork(spriteContext, radius)
-        const sprite = { canvas: spriteCanvas, size }
-        arcaneCircleSpriteCache.set(cacheKey, sprite)
-        return sprite
+        arcaneCircleSpriteCache.set(cacheKey, spriteCanvas)
+        return spriteCanvas
       }
 
       const drawArcaneCircle = (
@@ -1983,9 +2249,10 @@ function createScratchPostApp(): MicroApp {
         centerY: number,
         radius: number,
         alpha = 1,
-        rotation = timestamp * 0.00008
+        rotation = timestamp * 0.00008,
+        artworkRadius = radius
       ) => {
-        const sprite = arcaneCircleSprite(radius)
+        const sprite = arcaneCircleSprite(artworkRadius)
         if (!sprite) {
           return
         }
@@ -1994,21 +2261,12 @@ function createScratchPostApp(): MicroApp {
         context.translate(centerX, centerY)
         context.rotate(rotation)
         context.globalAlpha = alpha
-        context.drawImage(
-          sprite.canvas,
-          -sprite.size / 2,
-          -sprite.size / 2,
-          sprite.size,
-          sprite.size
-        )
+        const size = radius * 2.5
+        context.drawImage(sprite, -size / 2, -size / 2, size, size)
         context.restore()
       }
 
-      const drawSacrificeBackground = (timestamp: number) => {
-        if (humanHandSacrifices <= 0) {
-          return
-        }
-
+      const drawSacrificeBackdrop = () => {
         if (
           !sacrificeBackgroundGradientCache ||
           sacrificeBackgroundGradientCache.width !== displayWidth ||
@@ -2033,35 +2291,18 @@ function createScratchPostApp(): MicroApp {
         }
         context.fillStyle = sacrificeBackgroundGradientCache.gradient
         context.fillRect(0, 0, displayWidth, displayHeight)
-        const radius = Math.max(34, Math.min(68, displayWidth * 0.15, displayHeight * 0.11))
-        const circleCount = Math.min(
-          maximumDisplayedSacrificeCircles,
-          humanHandSacrifices
-        )
-        const availableRowDistance = Math.max(0, displayHeight - radius * 1.7)
+      }
 
-        for (let circleIndex = 0; circleIndex < circleCount; circleIndex += 1) {
-          const row = Math.floor(circleIndex / 2)
-          const onRight = circleIndex % 2 === 0
-          const phase = circleIndex * 1.73
-          const hoverSpeed = 0.00055 + circleIndex * 0.00009
-          const hoverDistance = 4 + (circleIndex % 3) * 1.5
-          const floatX = Math.cos(timestamp * hoverSpeed * 0.73 + phase) * hoverDistance * 0.35
-          const floatY = Math.sin(timestamp * hoverSpeed + phase) * hoverDistance
-          const baseX = onRight ? displayWidth - radius * 0.72 : radius * 0.72
-          const baseY = radius * 0.85 + (availableRowDistance * row) / 4
-          const rotationDirection = circleIndex % 2 === 0 ? 1 : -1
-          const rotationSpeed = 0.000045 + circleIndex * 0.000014
-          const rotation = timestamp * rotationSpeed * rotationDirection + phase
-
-          drawArcaneCircle(
-            timestamp,
-            baseX + floatX,
-            baseY + floatY,
-            radius,
-            0.78,
-            rotation
-          )
+      const drawSacrificeBackground = (timestamp: number) => {
+        if (humanHandSacrifices <= 0) {
+          return
+        }
+        drawSacrificeBackdrop()
+        const radius = sacrificeRuneRadius(displayWidth, displayHeight)
+        const count = Math.min(maximumDisplayedSacrificeCircles, humanHandSacrifices)
+        for (let index = 0; index < count; index += 1) {
+          const pose = sacrificeRunePose(timestamp, displayWidth, displayHeight, index)
+          drawArcaneCircle(timestamp, pose.x, pose.y, radius, 0.78, pose.rotation)
         }
       }
 
@@ -2238,7 +2479,7 @@ function createScratchPostApp(): MicroApp {
           y += Math.max(30, fontSize + 12)
         }
 
-        if (humanHandsLevel > humanHandSacrificeDefinition.cost) {
+        if (!ascended && humanHandsLevel > humanHandSacrificeDefinition.cost) {
           const label = humanHandSacrificeDefinition.label
           const iconX = 9
           const iconY = y - 2
@@ -2458,7 +2699,7 @@ function createScratchPostApp(): MicroApp {
       const advanceAutoScratcherCountdowns = (timestamp: number) => {
         const elapsedSeconds = Math.max(0, (timestamp - lastAutomaticProgressAt) / 1000)
         lastAutomaticProgressAt = timestamp
-        if (!elapsedSeconds) {
+        if (ritual || !elapsedSeconds) {
           return
         }
 
@@ -2578,6 +2819,16 @@ function createScratchPostApp(): MicroApp {
           return
         }
 
+        if (ascended && heaven?.ready) {
+          if (createParticles) {
+            for (const batch of dueBatches) {
+              heaven.autoFiber(autoScratcherDefinitions.indexOf(batch.definition), batch.count)
+            }
+          }
+          recordTwinesScratched(totalDue)
+          return
+        }
+
         const availableParticles = Math.min(
           createParticles && layout ? totalDue : 0,
           Math.max(0, maximumTwines - twines.length)
@@ -2652,12 +2903,98 @@ function createScratchPostApp(): MicroApp {
         if (!appActive) {
           return
         }
-        context.clearRect(0, 0, displayWidth, displayHeight)
         if (!imageReady) {
           return
         }
-        drawSacrificeBackground(timestamp)
+        const layout = imageLayout()
+        const eligibility = canAscend()
+        if (eligibility && ascendButton.style.display !== 'flex') {
+          void scratchAudio.preloadAscension()
+        }
+        ascendButton.style.display = eligibility ? 'flex' : 'none'
 
+        if (ritual && heaven) {
+          const elapsed = Math.max(0, timestamp - ritual.startedAt)
+          const burnTime = elapsed - ascensionIntroDuration
+          if (burnTime >= burnDuration && !heaven.ready) {
+            cancelRitual()
+          } else {
+            const revealing = burnTime >= burnDuration
+            const landing = (burnTime - burnDuration - revealDuration) / 1000
+            const phase = burnTime < 0 ? 'runes' : !revealing ? 'burn' : landing < 0 ? 'reveal' : 'landing'
+            const phaseChanged = surface.dataset.scratchPostPhase !== phase
+            setPhase(phase)
+            const cue = phase === 'burn' ? ascensionRuneAt(burnTime)
+              : landing >= fallDurationSeconds ? ascensionTokens : -1
+            if (cue > ritual.lastCue) {
+              ritual.lastCue = cue
+              scratchAudio.playAscension(cue === ascensionTokens ? 'spring' : 'whoosh')
+            }
+            if (landing < 0 || phaseChanged) {
+              context.clearRect(0, 0, displayWidth, displayHeight)
+            }
+            // Warm the visible backing layer behind the opaque burn before the swipe.
+            if (!ritual.warmed && burnTime >= burnDuration - 2200 && heaven.ready) {
+              ritual.warmed = true
+              heaven.show(true)
+              heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, 1.65, -1, noTiers, 0, 0)
+            }
+            if (revealing) {
+              heaven.show(true)
+              const drop = 1.65 * (1 - Math.min(1, Math.max(0, landing / fallDurationSeconds)) ** 2)
+              heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, drop, landing, noTiers, 0, 0)
+            }
+            if (landing < 0) {
+              if (burnTime < 0) {
+                drawSacrificeBackdrop()
+              }
+              ritual.fire.draw(
+                context, burnTime, displayWidth, displayHeight, layout,
+                (x, y, radius, alpha, rotation, artworkRadius) =>
+                  drawArcaneCircle(timestamp, x, y, radius, alpha, rotation, artworkRadius)
+              )
+            }
+            if (elapsed < ascensionDuration) {
+              requestDraw()
+              return
+            }
+            completeRitual(timestamp)
+          }
+        }
+
+        if (ascended && !restoredModelRequested && !heaven?.ready) {
+          restoredModelRequested = true
+          const scene = getHeaven()
+          void scene?.prepare(host.modelUrl ?? modelAsset.href).then(requestDraw).catch(() => {})
+        }
+        if (ascended && heaven?.ready) {
+          setPhase('ascended')
+          heaven.show(true)
+          for (let i = 0; i < tierCounts.length; i += 1) {
+            tierCounts[i] = autoScratchers[autoScratcherDefinitions[i].id].actors.length
+          }
+          advanceAutoScratcherCountdowns(timestamp)
+          emitDueAutoScratches(timestamp, undefined, true)
+          heaven.draw(timestamp, displayWidth, displayHeight, pixelRatio, 0, -1, tierCounts, humanHandActorCount(), humanHandsLevel)
+          if (hudDirty || purchaseEmphasis.size > 0 || timestamp - hudAt >= 50) {
+            hudDirty = false
+            hudAt = timestamp
+            context.clearRect(0, 0, displayWidth, displayHeight)
+            drawTwineCounter()
+            drawAutoScratcherOptions(timestamp)
+          }
+          if (!audioFading && timestamp - lastInputAt > inputHoldMilliseconds) {
+            audioFading = true
+            scratchAudio.setIntensity(0, audioFadeSeconds)
+          }
+          requestDraw()
+          return
+        }
+
+        setPhase('flat')
+        hudDirty = true
+        context.clearRect(0, 0, displayWidth, displayHeight)
+        drawSacrificeBackground(timestamp)
         const idleMilliseconds = timestamp - lastInputAt
         const inputActive = idleMilliseconds <= inputHoldMilliseconds
         const intensity = inputActive
@@ -2666,7 +3003,6 @@ function createScratchPostApp(): MicroApp {
         const amplitude = inputActive && intensity > 0 ? 1 + intensity * 7 : 0
         const offsetX = amplitude ? (Math.random() * 2 - 1) * amplitude : 0
         const offsetY = amplitude ? (Math.random() * 2 - 1) * amplitude : 0
-        const layout = imageLayout()
 
         context.drawImage(
           image,
@@ -2735,8 +3071,12 @@ function createScratchPostApp(): MicroApp {
         )
 
       const buyUpgrade = (id: PurchaseId) => {
+        if (ritual) {
+          return
+        }
+        hudDirty = true
         if (id === humanHandSacrificeId) {
-          if (humanHandsLevel <= humanHandSacrificeDefinition.cost) {
+          if (ascended || humanHandsLevel <= humanHandSacrificeDefinition.cost) {
             return
           }
 
@@ -2809,7 +3149,7 @@ function createScratchPostApp(): MicroApp {
       }
 
       const handlePointerDown = (event: PointerEvent) => {
-        if (!appActive) {
+        if (!appActive || ritual) {
           return
         }
 
@@ -2825,11 +3165,13 @@ function createScratchPostApp(): MicroApp {
       }
 
       const handleTouchStart = () => {
-        scratchAudio.resume()
+        if (!ritual) {
+          scratchAudio.resume()
+        }
       }
 
       const recordMovement = (event: PointerEvent) => {
-        if (!appActive) {
+        if (!appActive || ritual) {
           return
         }
 
@@ -2838,13 +3180,15 @@ function createScratchPostApp(): MicroApp {
         const localX = event.clientX - rect.left
         const localY = event.clientY - rect.top
         const purchase = findPurchaseAt(localX, localY)
-        surface.style.cursor = purchase ? 'pointer' : originalCursor
+        surface.style.cursor = purchase || ascendButton.contains(event.target as Node) ? 'pointer' : originalCursor
         if (purchase) {
           resetPointer()
           return
         }
+        const scene = ascended && heaven?.ready ? heaven : undefined
+        const point = scene?.hit(localX, localY, displayWidth, displayHeight)
         const scratchable = collisionBitmaps?.scratchable
-        if (!scratchable || !hitsBitmap(scratchable, localX, localY, imageLayout())) {
+        if (scene ? !point : !scratchable || !hitsBitmap(scratchable, localX, localY, imageLayout())) {
           resetPointer()
           return
         }
@@ -2859,15 +3203,17 @@ function createScratchPostApp(): MicroApp {
           return
         }
 
-        emitTwine(
-          localX,
-          localY,
-          event.clientX - previous.x,
-          event.clientY - previous.y,
-          timestamp - previous.timestamp,
-          distance,
-          timestamp
-        )
+        if (scene && point) {
+          const speed = distance / Math.max(.008, (timestamp - previous.timestamp) / 1000)
+          if (scene.scratch(point, distance, speed, displayWidth)) {
+            recordTwinesScratched()
+          }
+        } else {
+          emitTwine(
+            localX, localY, event.clientX - previous.x, event.clientY - previous.y,
+            timestamp - previous.timestamp, distance, timestamp
+          )
+        }
         motionSamples.push({ distance, timestamp })
         lastInputAt = timestamp
         audioFading = false
@@ -2877,6 +3223,7 @@ function createScratchPostApp(): MicroApp {
       }
 
       const resetPointer = () => {
+        heaven?.resetStroke()
         lastPointerPosition = undefined
         distanceSinceLastTwine = 0
         nextTwineDistance = 18 + Math.random() * 18
@@ -2910,6 +3257,9 @@ function createScratchPostApp(): MicroApp {
         advanceAutomaticProgress(timestamp)
         if (suspendedAt !== undefined) {
           const suspendedMilliseconds = Math.max(0, timestamp - suspendedAt)
+          if (ritual) {
+            ritual.startedAt += suspendedMilliseconds
+          }
           twines.forEach((twine) => {
             twine.bornAt += suspendedMilliseconds
           })
@@ -2942,7 +3292,11 @@ function createScratchPostApp(): MicroApp {
         animationFrame = 0
         surface.style.cursor = originalCursor
         resetPointer()
-        scratchAudio.setIntensity(0, audioFadeSeconds)
+        if (ritual) {
+          scratchAudio.silence()
+        } else {
+          scratchAudio.setIntensity(0, audioFadeSeconds)
+        }
       }
       resizeApp = resize
       destroyApp = () => {
@@ -2962,6 +3316,12 @@ function createScratchPostApp(): MicroApp {
         surface.removeEventListener('pointerup', resetPointer)
         surface.removeEventListener('pointercancel', resetPointer)
         image.src = ''
+        ascendButton.remove()
+        ritual = undefined
+        const scene = heaven
+        heaven = undefined
+        scene?.destroy()
+        delete surface.dataset.scratchPostPhase
         twines = []
         context.clearRect(0, 0, displayWidth, displayHeight)
         scratchAudio.destroy()

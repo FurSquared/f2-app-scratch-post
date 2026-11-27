@@ -14,7 +14,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./assets/scratch-post.webp": "./assets/scratch-post.webp"
+    "./assets/scratch-post.webp": "./assets/scratch-post.webp",
+    "./assets/scratch-post.glb": "./assets/scratch-post.glb"
   },
   "repository": {
     "type": "git",
