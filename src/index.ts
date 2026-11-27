@@ -1394,13 +1394,16 @@ function createScratchPostApp(): MicroApp {
         heaven?.beginPlay()
         hudDirty = true
         lastAutomaticProgressAt = timestamp
+        twinesScratched = 0
+        twinesScratchedThisMount = 0
+        twinesScratchedDirty = true
         const starter = autoScratcherDefinitions[0]
         const bapper = createAutoScratcherActor(starter.id)
+        bapper.countdownSeconds = 1 / starter.twinesPerSecond
         autoScratchers[starter.id].actors.push(bapper)
-        staggerAutoScratcherActors(starter, bapper)
         autoScratchersDirty = true
         humanHandSacrificesDirty = true
-        // The inventory and ascended flag become durable together only after the landing.
+        // The score, inventory, and ascended flag become durable together after the landing.
         void persistAppState()
       }
 
